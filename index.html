@@ -28,18 +28,19 @@
     <h1 class="home-title">LE GUIDE<br>DU GEEK</h1>
     <p class="home-sub">105 Questions • Mangas • Jeux Vidéo • Séries</p>
     <div class="home-buttons">
-      <button class="btn btn-primary" onclick="App.goToLogin()">🎮 Rejoindre la partie</button>
-      <button class="btn btn-ghost" onclick="App.goToAdminLogin()">🔐 Admin</button>
+      <button class="btn btn-primary full" onclick="App.goToLogin()">🎮 Rejoindre la partie</button>
+      <button class="btn btn-ghost full" onclick="App.goToAdminLogin()">🔐 Admin</button>
     </div>
     <div class="home-leaderboard-btn" onclick="App.showLeaderboard()">🏆 Voir le classement</div>
   </div>
 </div>
 
-<!-- LOGIN — Choix : nouveau / existant -->
+<!-- LOGIN -->
 <div id="screen-login" class="screen">
   <div class="screen-header">
     <button class="back-btn" onclick="App.showScreen('home')">← Retour</button>
     <h2>Mon profil</h2>
+    <div style="width:70px"></div>
   </div>
   <div class="login-tabs">
     <button class="tab active" id="tab-new" onclick="Auth.showTab('new')">Nouveau joueur</button>
@@ -53,8 +54,8 @@
       <input type="text" id="new-pseudo" placeholder="ex: NarutoFan42" maxlength="20" autocomplete="off"/>
     </div>
     <div class="form-group">
-      <label>Mot de passe (pour te reconnecter)</label>
-      <input type="password" id="new-password" placeholder="Min. 4 caractères"/>
+      <label>Mot de passe (min. 4 car.)</label>
+      <input type="password" id="new-password" placeholder="Pour te reconnecter"/>
     </div>
     <div class="form-group">
       <label>Rejoindre une équipe (optionnel)</label>
@@ -82,7 +83,7 @@
         <input type="password" id="existing-password" placeholder="Ton mot de passe"/>
       </div>
       <div id="existing-error" class="error-msg hidden"></div>
-      <div style="display:flex;gap:10px;margin-top:8px">
+      <div style="display:flex;gap:12px;margin-top:8px">
         <button class="btn btn-ghost" style="flex:1" onclick="Auth.cancelExisting()">← Retour</button>
         <button class="btn btn-primary" style="flex:1" onclick="Auth.loginExisting()">Se connecter</button>
       </div>
@@ -95,6 +96,7 @@
   <div class="screen-header">
     <button class="back-btn" onclick="App.showScreen('home')">← Retour</button>
     <h2>Connexion Admin</h2>
+    <div style="width:70px"></div>
   </div>
   <div class="login-form">
     <div class="form-group">
@@ -122,29 +124,25 @@
   <div class="lobby-content">
     <div class="lobby-score-card">
       <div class="score-big" id="lobby-score">0</div>
-      <div class="score-label">points</div>
+      <div class="score-label">points au total</div>
     </div>
     <div class="lobby-team-card">
       <div class="team-label">Mon équipe</div>
       <div class="team-name" id="lobby-team-name">Sans équipe</div>
     </div>
-
-    <!-- État de la partie en cours -->
     <div id="lobby-game-status" class="game-status-banner hidden">
       <div class="game-status-icon">🎮</div>
       <div class="game-status-text">
-        <div class="game-status-title" id="game-status-title">Partie en attente</div>
+        <div class="game-status-title" id="game-status-title">Partie disponible</div>
         <div class="game-status-sub" id="game-status-sub"></div>
       </div>
-      <button class="btn btn-primary" id="game-join-btn" onclick="Game.joinCurrentGame()">Rejoindre</button>
+      <button class="btn btn-primary" id="game-join-btn" style="flex-shrink:0;height:44px;padding:0 16px;font-size:14px" onclick="Game.joinCurrentGame()">Rejoindre</button>
     </div>
-
-    <div class="lobby-section-title">Classements</div>
     <button class="btn btn-ghost full" onclick="App.showLeaderboard()">🏆 Voir le classement</button>
   </div>
 </div>
 
-<!-- GAME WAITING (joueur attend que l'admin lance) -->
+<!-- GAME WAITING -->
 <div id="screen-game-waiting" class="screen">
   <div class="waiting-content">
     <div class="waiting-icon">⏳</div>
@@ -152,20 +150,26 @@
     <p class="waiting-sub">En attente du lancement par l'admin…</p>
     <div class="waiting-info" id="waiting-info"></div>
     <div class="waiting-players" id="waiting-players"></div>
-    <button class="btn btn-ghost mt" onclick="Game.leaveGame()">← Quitter</button>
+    <button class="btn btn-ghost mt" onclick="Game.leaveGame()">← Quitter la salle</button>
   </div>
 </div>
 
-<!-- GAME (synchronized) -->
+<!-- GAME -->
 <div id="screen-game" class="screen">
+  <!-- Pause overlay -->
+  <div class="pause-overlay hidden" id="pause-overlay">
+    <div class="pause-title">⏸ PAUSE</div>
+    <div class="pause-sub">L'admin reprendra bientôt…</div>
+  </div>
+
   <div class="game-header">
     <div class="game-progress">
       <span id="game-q-num">1</span>/<span id="game-q-total">10</span>
     </div>
     <div class="game-timer-wrap">
-      <svg class="timer-ring" viewBox="0 0 44 44">
-        <circle class="timer-bg" cx="22" cy="22" r="19"/>
-        <circle class="timer-arc" id="timer-arc" cx="22" cy="22" r="19"/>
+      <svg class="timer-ring" viewBox="0 0 48 48">
+        <circle class="timer-bg" cx="24" cy="24" r="22"/>
+        <circle class="timer-arc" id="timer-arc" cx="24" cy="24" r="22"/>
       </svg>
       <span id="game-timer">20</span>
     </div>
@@ -179,11 +183,13 @@
     <!-- Mode aveugle -->
     <div class="blind-zone hidden" id="blind-zone">
       <div class="blind-attempts" id="blind-attempts"></div>
-      <div class="blind-input-row">
+      <div class="blind-input-row" id="blind-input-row">
         <input type="text" id="blind-answer" placeholder="Ta réponse…" autocomplete="off"/>
         <button class="btn btn-primary" onclick="Game.submitBlindAnswer()">✓</button>
       </div>
-      <div class="blind-timer-label" id="blind-timer-label">Réponse libre…</div>
+      <button class="blind-reveal-btn" id="blind-reveal-btn" onclick="Game.revealChoices()">
+        👁 Voir les propositions
+      </button>
     </div>
 
     <div class="answers-grid" id="answers-grid"></div>
@@ -196,11 +202,14 @@
     </div>
   </div>
 
-  <!-- Speed: podium live -->
+  <!-- Speed podium -->
   <div class="speed-live-bar hidden" id="speed-live-bar">
-    <div class="speed-live-title">Premiers à répondre</div>
+    <div class="speed-live-title">Premiers à répondre correctement</div>
     <div id="speed-live-list"></div>
   </div>
+
+  <!-- Leave button -->
+  <button class="game-leave-btn" onclick="Game.requestLeave()">Quitter ✕</button>
 </div>
 
 <!-- GAME END -->
@@ -226,6 +235,7 @@
   <div class="screen-header">
     <button class="back-btn" onclick="App.backToLobby()">← Retour</button>
     <h2>🏆 Classements</h2>
+    <div style="width:70px"></div>
   </div>
   <div class="leaderboard-tabs">
     <button class="tab active" onclick="Leaderboard.show('players')" id="tab-lb-players">Joueurs</button>
@@ -239,6 +249,7 @@
   <div class="screen-header">
     <button class="back-btn" onclick="Auth.logout()">⏻ Déco</button>
     <h2>🛠 Admin</h2>
+    <div style="width:70px"></div>
   </div>
   <div class="admin-tabs">
     <button class="tab active" onclick="Admin.showTab('game')" id="atab-game">Partie</button>
