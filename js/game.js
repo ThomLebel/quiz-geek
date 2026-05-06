@@ -1,415 +1,504 @@
 // ═══════════════════════════════════════════
-// GAME ENGINE
+// GAME ENGINE v2 — Multi-joueurs synchronisé via Firestore
+// Architecture : l'admin crée/contrôle un doc "currentGame" dans Firestore.
+// Les joueurs écoutent ce doc en temps réel et suivent l'état.
 // ═══════════════════════════════════════════
 import { db } from './firebase-config.js';
 import {
-  doc, updateDoc, increment, collection, addDoc, serverTimestamp, getDoc, getDocs, query, orderBy, limit, where
+  doc, setDoc, updateDoc, getDoc, onSnapshot,
+  increment, addDoc, collection, serverTimestamp, deleteDoc
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-const TIMER_NORMAL = 20;
-const TIMER_BLIND = 24;
-const TIMER_SPEED = 15;
-const CIRCUMFERENCE = 2 * Math.PI * 19; // ~119.4
+const CIRC = 119.4; // 2π × 19
 
-let state = {
-  mode: 'normal',       // 'normal' | 'blind' | 'speed'
-  questions: [],
-  currentIndex: 0,
-  score: 0,
-  correct: 0,
-  incorrect: 0,
-  timerInterval: null,
-  timeLeft: 20,
-  totalTime: 20,
+// État local du joueur
+let local = {
   answered: false,
-  blindAnswered: false,
-  blindRevealed: false,
-  speedAnswers: []      // for speed mode: [{uid, pseudo, time, correct}]
+  blindCorrect: false,
+  sessionScore: 0,
+  sessionCorrect: 0,
+  sessionTotal: 0,
+  speedAnswerTime: null,
+  unsubGame: null,
+  countdownInterval: null
 };
 
 export const Game = {
-  // ── Setup
-  initSetupUI(mode) {
-    state.mode = mode;
-    const titles = { normal: '🎯 Mode Normal', blind: '🙈 Mode Aveugle', speed: '⚡ Mode Rapidité' };
-    document.getElementById('setup-title').textContent = titles[mode];
-    document.getElementById('setup-back-btn').onclick = () => window.App.backToLobby();
+  _unsubGame: null,
 
-    // btn-group logic
-    document.querySelectorAll('.btn-group').forEach(group => {
-      group.querySelectorAll('.btn-toggle').forEach(btn => {
-        btn.onclick = () => {
-          group.querySelectorAll('.btn-toggle').forEach(b => b.classList.remove('active'));
-          btn.classList.add('active');
-        };
-      });
+  // ──────────────────────────────────────────
+  // ÉCOUTE DE L'ÉTAT DU JEU (côté joueur)
+  // ──────────────────────────────────────────
+  listenToGameState() {
+    if (Game._unsubGame) Game._unsubGame();
+
+    Game._unsubGame = onSnapshot(doc(db, 'game', 'current'), (snap) => {
+      if (!snap.exists()) {
+        // Pas de partie active — retour lobby
+        document.getElementById('lobby-game-status')?.classList.add('hidden');
+        return;
+      }
+      const state = snap.data();
+      Game.handleGameState(state);
     });
   },
 
-  getSetupOptions() {
-    const count = parseInt(document.querySelector('#setup-count .btn-toggle.active')?.dataset.val || '10');
-    const theme = document.querySelector('#setup-theme .btn-toggle.active')?.dataset.val || 'all';
-    const difficulty = document.querySelector('#setup-difficulty .btn-toggle.active')?.dataset.val || 'all';
-    return { count, theme, difficulty };
+  handleGameState(state) {
+    const currentScreen = document.querySelector('.screen.active')?.id;
+
+    switch (state.status) {
+      case 'waiting':
+        // Partie configurée, en attente que les joueurs rejoignent
+        document.getElementById('lobby-game-status')?.classList.remove('hidden');
+        document.getElementById('game-status-title').textContent = '🎮 Partie configurée !';
+        document.getElementById('game-status-sub').textContent =
+          `${state.mode === 'normal' ? 'Mode Normal' : state.mode === 'blind' ? 'Mode Aveugle' : 'Mode Rapidité'} · ${state.questionCount} questions`;
+        document.getElementById('game-join-btn').textContent = 'Rejoindre';
+        if (currentScreen === 'screen-game-waiting') {
+          Game.updateWaitingScreen(state);
+        }
+        break;
+
+      case 'question':
+        // Question en cours — aller sur l'écran de jeu
+        if (currentScreen !== 'screen-game') {
+          local.answered = false;
+          local.blindCorrect = false;
+          local.speedAnswerTime = null;
+          window.App.showScreen('game');
+        }
+        Game.renderQuestion(state);
+        break;
+
+      case 'reveal':
+        // Afficher la correction
+        Game.revealAnswer(state);
+        break;
+
+      case 'finished':
+        // Partie terminée
+        Game.showEndScreen(state);
+        break;
+    }
   },
 
-  buildQuestionList(count, theme, difficulty) {
-    let pool = [...window.QUESTIONS];
-
-    if (theme !== 'all') {
-      pool = pool.filter(q => q.theme === theme);
+  joinCurrentGame() {
+    window.App.showScreen('game-waiting');
+    // Subscribe will have already happened in listenToGameState
+    // Update waiting screen
+    getDoc(doc(db, 'game', 'current')).then(snap => {
+      if (snap.exists()) Game.updateWaitingScreen(snap.data());
+    });
+    // Register player as ready
+    const uid = window.currentUser?.uid;
+    if (uid) {
+      updateDoc(doc(db, 'game', 'current'), {
+        [`readyPlayers.${uid}`]: window.currentUser.pseudo
+      }).catch(() => {});
     }
-    if (difficulty !== 'all') {
-      pool = pool.filter(q => q.difficulty === difficulty);
-    }
-
-    // Sort by difficulty ascending, then shuffle within same difficulty
-    const order = { debutant: 1, connaisseur: 2, otaku: 3 };
-    pool.sort((a, b) => order[a.difficulty] - order[b.difficulty] || Math.random() - 0.5);
-
-    if (count === 105) return pool;
-    return pool.slice(0, Math.min(count, pool.length));
   },
 
-  startGame() {
-    const { count, theme, difficulty } = Game.getSetupOptions();
-    const questions = Game.buildQuestionList(count, theme, difficulty);
-
-    if (questions.length === 0) {
-      window.App.toast('Aucune question pour ces filtres !');
-      return;
+  leaveGame() {
+    const uid = window.currentUser?.uid;
+    if (uid) {
+      // Remove from ready players
+      updateDoc(doc(db, 'game', 'current'), {
+        [`readyPlayers.${uid}`]: null
+      }).catch(() => {});
     }
-
-    state.questions = questions;
-    state.currentIndex = 0;
-    state.score = 0;
-    state.correct = 0;
-    state.incorrect = 0;
-    state.speedAnswers = [];
-
-    window.App.showScreen('game');
-    Game.showQuestion();
+    window.App.backToLobby();
   },
 
-  showQuestion() {
-    if (state.currentIndex >= state.questions.length) {
-      Game.endGame();
-      return;
-    }
+  updateWaitingScreen(state) {
+    const ready = Object.entries(state.readyPlayers || {});
+    document.getElementById('waiting-info').innerHTML = `
+      <strong>Mode :</strong> ${state.mode === 'normal' ? '🎯 Normal' : state.mode === 'blind' ? '🙈 Aveugle' : '⚡ Rapidité'}<br>
+      <strong>Questions :</strong> ${state.questionCount}<br>
+      <strong>Timer :</strong> ${state.timerSeconds}s par question
+    `;
+    document.getElementById('waiting-players').innerHTML = ready.map(([uid, pseudo]) => {
+      const u = window.currentUser?.uid === uid ? window.currentUser : null;
+      const av = (window.AVATARS || []).find(a => a.id === (u?.avatarId || ''));
+      return `<div class="waiting-player-chip">
+        <div class="chip-avatar">${av ? av.svg : ''}</div>
+        <span>${pseudo}</span>
+      </div>`;
+    }).join('');
+  },
 
-    const q = state.questions[state.currentIndex];
-    state.answered = false;
-    state.blindAnswered = false;
-    state.blindRevealed = false;
-    state.speedAnswers = [];
+  // ──────────────────────────────────────────
+  // AFFICHER UNE QUESTION (côté joueur)
+  // ──────────────────────────────────────────
+  renderQuestion(state) {
+    const qData = state.currentQuestion;
+    if (!qData) return;
 
-    // Update header
-    document.getElementById('game-q-num').textContent = `Q${state.currentIndex + 1}`;
-    document.getElementById('game-q-total').textContent = state.questions.length;
-    document.getElementById('game-current-score').textContent = state.score;
+    local.answered = (state.answers?.[window.currentUser?.uid] !== undefined);
+    local.blindCorrect = false;
+
+    // Header
+    document.getElementById('game-q-num').textContent = state.questionIndex + 1;
+    document.getElementById('game-q-total').textContent = state.questionCount;
+    document.getElementById('game-current-score').textContent = local.sessionScore;
 
     // Difficulty badge
     const badge = document.getElementById('game-difficulty-badge');
-    badge.textContent = window.DIFFICULTY_LABELS[q.difficulty];
-    badge.className = `difficulty-badge ${q.difficulty}`;
+    badge.textContent = window.DIFFICULTY_LABELS?.[qData.difficulty] || qData.difficulty;
+    badge.className = `difficulty-badge ${qData.difficulty}`;
 
-    // Question text
-    document.getElementById('game-question').textContent = q.question;
+    document.getElementById('game-question').textContent = qData.question;
 
     // Hide feedback
     document.getElementById('answer-feedback').classList.add('hidden');
 
-    // Shuffle answers for display
-    const shuffled = q.answers.map((text, idx) => ({ text, originalIdx: idx }));
-    for (let i = shuffled.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-    }
-    state.shuffledAnswers = shuffled;
-
-    // Timer
-    const totalTime = state.mode === 'blind' ? TIMER_BLIND : state.mode === 'speed' ? TIMER_SPEED : TIMER_NORMAL;
-    state.totalTime = totalTime;
-    state.timeLeft = totalTime;
-
-    // Blind mode setup
-    const blindZone = document.getElementById('blind-input-zone');
+    // Reset blind zone
+    const blindZone = document.getElementById('blind-zone');
     const answersGrid = document.getElementById('answers-grid');
+    document.getElementById('blind-attempts').innerHTML = '';
+    document.getElementById('blind-answer').value = '';
 
     if (state.mode === 'blind') {
       blindZone.classList.remove('hidden');
       answersGrid.innerHTML = '';
       answersGrid.style.display = 'none';
-      document.getElementById('blind-answer').value = '';
-      document.getElementById('blind-countdown').textContent = `Réponse libre pendant ${Math.floor(totalTime / 2)}s`;
+      document.getElementById('blind-timer-label').textContent = 'Réponse libre…';
+      if (local.answered) {
+        // Already answered in blind mode — freeze input
+        document.getElementById('blind-answer').disabled = true;
+        document.querySelector('.blind-input-row .btn')?.setAttribute('disabled', '');
+      }
     } else {
       blindZone.classList.add('hidden');
       answersGrid.style.display = 'grid';
-      Game.renderAnswerButtons(shuffled, false);
+      Game.renderAnswerButtons(qData.shuffledAnswers, local.answered);
     }
 
-    Game.startTimer();
+    // Speed live bar
+    const speedBar = document.getElementById('speed-live-bar');
+    if (state.mode === 'speed') {
+      speedBar.classList.remove('hidden');
+      Game.updateSpeedBar(state);
+    } else {
+      speedBar.classList.add('hidden');
+    }
+
+    // Timer (client side countdown from server timestamp)
+    Game.startLocalTimer(state);
   },
 
-  renderAnswerButtons(shuffled, disabled) {
+  renderAnswerButtons(shuffledAnswers, disabled) {
     const letters = ['A', 'B', 'C', 'D'];
     const grid = document.getElementById('answers-grid');
     grid.innerHTML = '';
-    shuffled.forEach((ans, i) => {
+    shuffledAnswers.forEach((ans, i) => {
       const btn = document.createElement('button');
       btn.className = 'answer-btn';
       btn.disabled = disabled;
+      btn.dataset.idx = i;
       btn.innerHTML = `<span class="answer-letter">${letters[i]}</span>${ans.text}`;
-      btn.onclick = () => Game.selectAnswer(ans.originalIdx, btn);
+      btn.onclick = () => Game.selectAnswer(ans.originalIdx, i, btn);
       grid.appendChild(btn);
     });
   },
 
-  selectAnswer(originalIdx, btn) {
-    if (state.answered) return;
-    const q = state.questions[state.currentIndex];
+  async selectAnswer(originalIdx, btnIdx, btn) {
+    if (local.answered) return;
+    local.answered = true;
 
-    if (state.mode === 'speed') {
-      // Speed mode: record answer
-      state.speedAnswers.push({
-        uid: window.currentUser.uid,
+    const snap = await getDoc(doc(db, 'game', 'current'));
+    const state = snap.data();
+    const qData = state.currentQuestion;
+    const isCorrect = originalIdx === qData.correct;
+
+    // Disable all buttons
+    document.querySelectorAll('.answer-btn').forEach(b => b.disabled = true);
+
+    // For speed mode: record time
+    local.speedAnswerTime = state.mode === 'speed' ? Date.now() : null;
+
+    // Save answer to Firestore
+    const uid = window.currentUser?.uid;
+    await updateDoc(doc(db, 'game', 'current'), {
+      [`answers.${uid}`]: {
         pseudo: window.currentUser.pseudo,
-        time: state.totalTime - state.timeLeft,
-        correct: originalIdx === q.correct
-      });
-    }
-
-    state.answered = true;
-    clearInterval(state.timerInterval);
-    Game.evaluateAnswer(originalIdx, btn);
-  },
-
-  evaluateAnswer(originalIdx, btn) {
-    const q = state.questions[state.currentIndex];
-    const isCorrect = originalIdx === q.correct;
-
-    // Highlight correct/wrong
-    const allBtns = document.querySelectorAll('.answer-btn');
-    allBtns.forEach(b => { b.disabled = true; });
-
-    // Find correct button
-    state.shuffledAnswers.forEach((ans, i) => {
-      if (ans.originalIdx === q.correct) {
-        allBtns[i]?.classList.add('correct');
+        originalIdx,
+        isCorrect,
+        answeredAt: Date.now()
       }
     });
 
-    if (btn) {
-      const btnOriginalIdx = parseInt(btn.dataset?.idx ?? '') ||
-        state.shuffledAnswers.findIndex(a => btn.textContent.includes(a.text));
-      if (!isCorrect) btn.classList.add('wrong');
-    }
-
-    // Calculate points
-    let points = 0;
-    if (isCorrect) {
-      const base = window.DIFFICULTY_POINTS[q.difficulty];
-      if (state.mode === 'blind' && state.blindAnswered && !state.blindRevealed) {
-        points = base * 4;
-      } else if (state.mode === 'speed') {
-        // Will be handled after all players answer in speed mode
-        // For solo, give full points
-        const positionPoints = [5, 4, 3];
-        points = positionPoints[0] || 0;
-      } else {
-        points = base;
-      }
-      state.score += points;
-      state.correct++;
-    } else {
-      state.incorrect++;
-    }
-
-    // Show feedback
-    Game.showFeedback(isCorrect, points, q.focus);
-
-    // Auto next
-    setTimeout(() => Game.nextQuestion(), 2800);
+    // Visual feedback immediately (don't wait for reveal state)
+    if (!isCorrect) btn.classList.add('wrong');
   },
 
-  showFeedback(isCorrect, points, focus) {
-    const fb = document.getElementById('answer-feedback');
-    document.getElementById('feedback-icon').textContent = isCorrect ? '✅' : '❌';
-    document.getElementById('feedback-text').textContent = isCorrect
-      ? `Bravo ! +${points} point${points > 1 ? 's' : ''}`
-      : 'Raté !';
-    document.getElementById('feedback-focus').textContent = focus;
-    fb.classList.remove('hidden');
-    document.getElementById('game-current-score').textContent = state.score;
-  },
+  // Blind mode: submit free text answer
+  async submitBlindAnswer() {
+    const snap = await getDoc(doc(db, 'game', 'current'));
+    const state = snap.data();
+    if (state.status !== 'question' || state.mode !== 'blind') return;
 
-  nextQuestion() {
-    state.currentIndex++;
-    Game.showQuestion();
-  },
-
-  // ── Blind mode
-  submitBlindAnswer() {
-    if (state.answered || state.blindAnswered) return;
-    const input = document.getElementById('blind-answer').value.trim().toLowerCase();
+    const input = document.getElementById('blind-answer').value.trim();
     if (!input) { window.App.toast('Entre une réponse !'); return; }
 
-    const q = state.questions[state.currentIndex];
-    const correctAnswer = q.answers[q.correct].toLowerCase();
+    const qData = state.currentQuestion;
+    const correct = qData.answers[qData.correct];
+    const isCorrect = Game.fuzzyMatch(input, correct);
 
-    // Fuzzy match: check if input is contained in correct answer or vice versa
-    const isCorrect = correctAnswer.includes(input) || input.includes(correctAnswer) ||
-      Game.levenshtein(input, correctAnswer) <= 2;
+    // Show attempt chip
+    const chip = document.createElement('div');
+    chip.className = `blind-attempt-chip ${isCorrect ? 'correct' : 'wrong'}`;
+    chip.textContent = input;
+    document.getElementById('blind-attempts').appendChild(chip);
+    document.getElementById('blind-answer').value = '';
 
-    state.blindAnswered = true;
-    state.answered = true;
-    clearInterval(state.timerInterval);
+    if (isCorrect && !local.blindCorrect) {
+      local.blindCorrect = true;
+      local.answered = true;
+      document.getElementById('blind-answer').disabled = true;
+      document.querySelector('.blind-input-row .btn')?.setAttribute('disabled', '');
+      document.getElementById('blind-timer-label').textContent = '✅ Bonne réponse !';
 
-    // Reveal answers
-    document.getElementById('blind-input-zone').classList.add('hidden');
-    const grid = document.getElementById('answers-grid');
-    grid.style.display = 'grid';
-    Game.renderAnswerButtons(state.shuffledAnswers, true);
+      // Save to Firestore as correct (blind)
+      const uid = window.currentUser?.uid;
+      await updateDoc(doc(db, 'game', 'current'), {
+        [`answers.${uid}`]: {
+          pseudo: window.currentUser.pseudo,
+          originalIdx: qData.correct,
+          isCorrect: true,
+          blindMode: true,
+          answeredAt: Date.now()
+        }
+      });
+    }
+  },
 
-    // Highlight correct
-    const allBtns = document.querySelectorAll('.answer-btn');
-    state.shuffledAnswers.forEach((ans, i) => {
-      if (ans.originalIdx === q.correct) allBtns[i]?.classList.add('correct');
-    });
-
-    const points = isCorrect ? window.DIFFICULTY_POINTS[q.difficulty] * 4 : 0;
-    if (isCorrect) state.score += points;
-    isCorrect ? state.correct++ : state.incorrect++;
-    Game.showFeedback(isCorrect, points, q.focus);
-    setTimeout(() => Game.nextQuestion(), 2800);
+  // Fuzzy match: accept partial match (first word, or edit distance ≤ 2)
+  fuzzyMatch(input, correct) {
+    const norm = s => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+    const a = norm(input);
+    const b = norm(correct);
+    if (b.includes(a) || a.includes(b)) return true;
+    // Check each word of the correct answer
+    const words = b.split(/\s+/).filter(w => w.length >= 3);
+    if (words.some(w => a === w || a.includes(w) || w.includes(a))) return true;
+    return Game.levenshtein(a, b) <= 2;
   },
 
   levenshtein(a, b) {
     const m = a.length, n = b.length;
-    const dp = Array.from({ length: m + 1 }, (_, i) => Array.from({ length: n + 1 }, (_, j) => i || j));
+    const dp = Array.from({length: m+1}, (_, i) => Array.from({length: n+1}, (_, j) => i||j));
     for (let i = 1; i <= m; i++)
       for (let j = 1; j <= n; j++)
-        dp[i][j] = a[i-1] === b[j-1] ? dp[i-1][j-1] : 1 + Math.min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1]);
+        dp[i][j] = a[i-1]===b[j-1] ? dp[i-1][j-1] : 1 + Math.min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1]);
     return dp[m][n];
   },
 
-  // ── Timer
-  startTimer() {
+  // ──────────────────────────────────────────
+  // LOCAL TIMER (visual only — real timer on admin side)
+  // ──────────────────────────────────────────
+  startLocalTimer(state) {
+    clearInterval(local.countdownInterval);
     const arcEl = document.getElementById('timer-arc');
     const timerEl = document.getElementById('game-timer');
-    const q = state.questions[state.currentIndex];
 
-    const updateArc = () => {
-      const pct = state.timeLeft / state.totalTime;
-      arcEl.style.strokeDashoffset = CIRCUMFERENCE * (1 - pct);
-      timerEl.textContent = state.timeLeft;
+    const startedAt = state.questionStartedAt; // ms timestamp
+    const total = state.timerSeconds;
+    arcEl.style.strokeDasharray = CIRC;
 
-      if (pct <= 0.25) {
-        arcEl.className = 'timer-arc danger';
-      } else if (pct <= 0.5) {
-        arcEl.className = 'timer-arc warning';
-      } else {
-        arcEl.className = 'timer-arc';
+    const tick = () => {
+      const elapsed = (Date.now() - startedAt) / 1000;
+      const remaining = Math.max(0, total - elapsed);
+      const pct = remaining / total;
+
+      arcEl.style.strokeDashoffset = CIRC * (1 - pct);
+      timerEl.textContent = Math.ceil(remaining);
+
+      arcEl.className = pct <= 0.25 ? 'timer-arc danger' : pct <= 0.5 ? 'timer-arc warning' : 'timer-arc';
+
+      // Blind: reveal choices after 10s
+      if (state.mode === 'blind') {
+        const elapsed10 = elapsed >= 10;
+        const blindZone = document.getElementById('blind-zone');
+        const answersGrid = document.getElementById('answers-grid');
+        if (elapsed10 && answersGrid.style.display === 'none') {
+          answersGrid.style.display = 'grid';
+          Game.renderAnswerButtons(state.currentQuestion.shuffledAnswers, local.answered);
+          document.getElementById('blind-timer-label').textContent = local.blindCorrect ? '✅ Bonne réponse !' : 'Choisis parmi les propositions…';
+          if (!local.blindCorrect) blindZone.classList.add('hidden');
+        }
+        if (!elapsed10 && !local.answered) {
+          const secsLeft = Math.max(0, Math.ceil(10 - elapsed));
+          document.getElementById('blind-timer-label').textContent = `Réponse libre encore ${secsLeft}s…`;
+        }
       }
+
+      if (remaining <= 0) clearInterval(local.countdownInterval);
     };
 
-    updateArc();
-    arcEl.style.strokeDasharray = CIRCUMFERENCE;
-
-    // Blind: reveal answers at half time
-    if (state.mode === 'blind') {
-      const halfTime = Math.floor(state.totalTime / 2);
-      const countdown = document.getElementById('blind-countdown');
-      countdown.textContent = `Réponse libre pendant ${halfTime}s`;
-    }
-
-    clearInterval(state.timerInterval);
-    state.timerInterval = setInterval(() => {
-      state.timeLeft--;
-      updateArc();
-
-      // Blind mode: reveal at half
-      if (state.mode === 'blind' && !state.blindRevealed) {
-        const halfTime = Math.floor(state.totalTime / 2);
-        const remaining = state.timeLeft - halfTime;
-        if (remaining <= 0 && !state.blindAnswered) {
-          state.blindRevealed = true;
-          document.getElementById('blind-input-zone').classList.add('hidden');
-          const grid = document.getElementById('answers-grid');
-          grid.style.display = 'grid';
-          Game.renderAnswerButtons(state.shuffledAnswers, false);
-          document.getElementById('blind-countdown').textContent = '';
-        } else if (!state.blindAnswered) {
-          document.getElementById('blind-countdown').textContent =
-            `Réponse libre pendant encore ${Math.abs(remaining)}s`;
-        }
-      }
-
-      if (state.timeLeft <= 0) {
-        clearInterval(state.timerInterval);
-        if (!state.answered) {
-          state.answered = true;
-          state.incorrect++;
-
-          // Show correct answer
-          if (state.mode === 'blind') {
-            document.getElementById('blind-input-zone').classList.add('hidden');
-            const grid = document.getElementById('answers-grid');
-            grid.style.display = 'grid';
-            Game.renderAnswerButtons(state.shuffledAnswers, true);
-          }
-          const allBtns = document.querySelectorAll('.answer-btn');
-          allBtns.forEach(b => { b.disabled = true; });
-          state.shuffledAnswers.forEach((ans, i) => {
-            if (ans.originalIdx === q.correct) allBtns[i]?.classList.add('correct');
-          });
-          Game.showFeedback(false, 0, q.focus);
-          setTimeout(() => Game.nextQuestion(), 2800);
-        }
-      }
-    }, 1000);
+    tick();
+    local.countdownInterval = setInterval(tick, 250);
   },
 
-  // ── End game
-  async endGame() {
-    clearInterval(state.timerInterval);
+  // ──────────────────────────────────────────
+  // REVEAL ANSWER STATE (admin transitions to this)
+  // ──────────────────────────────────────────
+  revealAnswer(state) {
+    clearInterval(local.countdownInterval);
+    const qData = state.currentQuestion;
 
-    // Save score to Firebase
-    try {
-      const uid = window.currentUser?.uid;
-      const isAdmin = window.currentUser?.isAdmin;
-      if (uid && !isAdmin) {
-        const playerRef = doc(db, 'players', uid);
-        await updateDoc(playerRef, {
-          score: increment(state.score),
-          gamesPlayed: increment(1),
-          correctAnswers: increment(state.correct)
-        });
-        window.currentUser.score = (window.currentUser.score || 0) + state.score;
+    // Stop timer at 0
+    document.getElementById('timer-arc').style.strokeDashoffset = CIRC;
+    document.getElementById('game-timer').textContent = '0';
 
-        // Update team score if in team
-        if (window.currentUser.teamId) {
-          const teamRef = doc(db, 'teams', window.currentUser.teamId);
-          await updateDoc(teamRef, { score: increment(state.score) });
-        }
+    // Highlight correct answer button
+    const allBtns = document.querySelectorAll('.answer-btn');
+    allBtns.forEach(b => b.disabled = true);
+    qData.shuffledAnswers?.forEach((ans, i) => {
+      if (ans.originalIdx === qData.correct) allBtns[i]?.classList.add('correct');
+    });
 
-        // Log game session
-        await addDoc(collection(db, 'gameSessions'), {
-          uid, pseudo: window.currentUser.pseudo,
-          mode: state.mode, score: state.score,
-          correct: state.correct, total: state.questions.length,
-          timestamp: serverTimestamp()
+    // Also show grid if blind mode
+    if (state.mode === 'blind') {
+      document.getElementById('blind-zone').classList.add('hidden');
+      const grid = document.getElementById('answers-grid');
+      grid.style.display = 'grid';
+      if (allBtns.length === 0) {
+        Game.renderAnswerButtons(qData.shuffledAnswers, true);
+        qData.shuffledAnswers?.forEach((ans, i) => {
+          const b = document.querySelectorAll('.answer-btn')[i];
+          if (ans.originalIdx === qData.correct) b?.classList.add('correct');
         });
       }
-    } catch (e) { console.error('Score save error:', e); }
+    }
 
-    // Show end screen
-    document.getElementById('end-score').textContent = state.score;
+    // Calculate points for this player
+    const myAnswer = state.answers?.[window.currentUser?.uid];
+    let points = 0;
+    let isCorrect = false;
+
+    if (myAnswer?.isCorrect) {
+      isCorrect = true;
+      const base = window.DIFFICULTY_POINTS?.[qData.difficulty] || 1;
+      if (state.mode === 'blind' && myAnswer.blindMode) {
+        points = base * 4;
+      } else if (state.mode === 'speed') {
+        // Rank-based points
+        const correctAnswers = Object.entries(state.answers || {})
+          .filter(([,v]) => v.isCorrect)
+          .sort((a, b) => a[1].answeredAt - b[1].answeredAt);
+        const myRank = correctAnswers.findIndex(([uid]) => uid === window.currentUser?.uid);
+        points = myRank === 0 ? 5 : myRank === 1 ? 4 : myRank === 2 ? 3 : 0;
+      } else {
+        points = base;
+      }
+    }
+
+    // Update local session stats
+    if (myAnswer !== undefined) {
+      if (isCorrect) { local.sessionScore += points; local.sessionCorrect++; }
+      local.sessionTotal++;
+    }
+
+    document.getElementById('game-current-score').textContent = local.sessionScore;
+
+    // Feedback
+    const fb = document.getElementById('answer-feedback');
+    document.getElementById('feedback-icon').textContent = isCorrect ? '✅' : (myAnswer ? '❌' : '⏱️');
+    document.getElementById('feedback-text').textContent = isCorrect
+      ? `+${points} point${points > 1 ? 's' : ''} !`
+      : myAnswer ? 'Raté !' : 'Temps écoulé !';
+    document.getElementById('feedback-focus').textContent = qData.focus || '';
+
+    const next = state.nextQuestionIn;
+    if (next) {
+      const countdown = () => {
+        const remaining = Math.max(0, Math.ceil((next - Date.now()) / 1000));
+        document.getElementById('feedback-next').textContent = remaining > 0
+          ? `Prochaine question dans ${remaining}s…`
+          : 'Question suivante !';
+      };
+      countdown();
+      const iv = setInterval(() => { countdown(); if (Date.now() >= next) clearInterval(iv); }, 500);
+    }
+
+    fb.classList.remove('hidden');
+
+    // Update speed bar
+    if (state.mode === 'speed') {
+      document.getElementById('speed-live-bar').classList.remove('hidden');
+      Game.updateSpeedBar(state);
+    }
+
+    // Update cumulative score on Firestore
+    const uid = window.currentUser?.uid;
+    if (uid && !window.currentUser?.isAdmin && points > 0) {
+      updateDoc(doc(db, 'players', uid), {
+        score: increment(points),
+        correctAnswers: increment(isCorrect ? 1 : 0)
+      }).catch(() => {});
+    }
+  },
+
+  updateSpeedBar(state) {
+    const list = document.getElementById('speed-live-list');
+    const answers = Object.entries(state.answers || {})
+      .filter(([,v]) => v.isCorrect)
+      .sort((a, b) => a[1].answeredAt - b[1].answeredAt)
+      .slice(0, 3);
+    const icons = ['🥇', '🥈', '🥉'];
+    list.innerHTML = answers.map(([uid, data], i) => `
+      <div class="speed-winner-row">
+        <span class="speed-pos">${icons[i]}</span>
+        <span>${data.pseudo}</span>
+      </div>
+    `).join('') || '<div style="color:var(--text3);font-size:13px">Personne encore…</div>';
+  },
+
+  // ──────────────────────────────────────────
+  // END SCREEN
+  // ──────────────────────────────────────────
+  async showEndScreen(state) {
+    clearInterval(local.countdownInterval);
+
+    // Final update
+    const uid = window.currentUser?.uid;
+    if (uid && !window.currentUser?.isAdmin && local.sessionTotal > 0) {
+      await updateDoc(doc(db, 'players', uid), {
+        gamesPlayed: increment(1)
+      }).catch(() => {});
+      // Update team score if in team
+      if (window.currentUser?.teamId) {
+        await updateDoc(doc(db, 'teams', window.currentUser.teamId), {
+          score: increment(local.sessionScore)
+        }).catch(() => {});
+      }
+    }
+
+    document.getElementById('end-score').textContent = local.sessionScore;
     document.getElementById('end-stats').innerHTML = `
-      ✅ ${state.correct} bonne${state.correct > 1 ? 's' : ''} réponse${state.correct > 1 ? 's' : ''}<br>
-      ❌ ${state.incorrect} erreur${state.incorrect > 1 ? 's' : ''}<br>
-      📊 ${Math.round((state.correct / state.questions.length) * 100)}% de réussite
+      ✅ ${local.sessionCorrect} bonne${local.sessionCorrect > 1 ? 's' : ''} réponse${local.sessionCorrect > 1 ? 's' : ''}<br>
+      ❌ ${local.sessionTotal - local.sessionCorrect} erreur${local.sessionTotal - local.sessionCorrect !== 1 ? 's' : ''}<br>
+      📊 ${local.sessionTotal ? Math.round((local.sessionCorrect/local.sessionTotal)*100) : 0}% de réussite
     `;
+
+    // Build final podium from state.finalScores if available
+    const finalScores = state.finalScores || {};
+    const sorted = Object.entries(finalScores).sort((a, b) => b[1].score - a[1].score).slice(0, 3);
+    const icons = ['🥇', '🥈', '🥉'];
+    document.getElementById('end-podium').innerHTML = sorted.length ? `
+      <div class="admin-section-title" style="margin-bottom:12px">Podium de la partie</div>
+      ${sorted.map(([, data], i) => `
+        <div class="podium-item" style="${i === 0 ? 'border-color:#ffd700' : ''}">
+          <span class="podium-rank">${icons[i]}</span>
+          <span class="podium-name">${data.pseudo}</span>
+          <span class="podium-score">${data.score}</span>
+        </div>
+      `).join('')}
+    ` : '';
+
+    // Reset session
+    local.sessionScore = 0; local.sessionCorrect = 0; local.sessionTotal = 0;
+
     window.App.showScreen('game-end');
   }
 };
