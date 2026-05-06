@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>Le Guide du Geek — Quiz EVG</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Bangers&family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════
+     SCREENS
+═══════════════════════════════════════════════ -->
+
+<!-- SCREEN: LOADING -->
+<div id="screen-loading" class="screen active">
+  <div class="loading-inner">
+    <div class="loading-logo">🎮</div>
+    <div class="loading-title">LE GUIDE DU GEEK</div>
+    <div class="loading-sub">Quiz EVG Edition Ultime</div>
+    <div class="loading-bar"><div class="loading-fill"></div></div>
+  </div>
+</div>
+
+<!-- SCREEN: HOME -->
+<div id="screen-home" class="screen">
+  <div class="home-bg-grid"></div>
+  <div class="home-content">
+    <div class="home-badge">EVG 2026</div>
+    <h1 class="home-title">LE GUIDE<br>DU GEEK</h1>
+    <p class="home-sub">105 Questions • Mangas • Jeux Vidéo • Séries</p>
+    <div class="home-buttons">
+      <button class="btn btn-primary" onclick="App.goToLogin()">🎮 Rejoindre la partie</button>
+      <button class="btn btn-ghost" onclick="App.goToAdmin()">🔐 Admin</button>
+    </div>
+    <div class="home-leaderboard-btn" onclick="App.showLeaderboard()">
+      🏆 Voir le classement
+    </div>
+  </div>
+</div>
+
+<!-- SCREEN: LOGIN / REGISTER -->
+<div id="screen-login" class="screen">
+  <div class="screen-header">
+    <button class="back-btn" onclick="App.showScreen('home')">← Retour</button>
+    <h2>Choisir un profil</h2>
+  </div>
+  <div class="login-form">
+    <div class="form-group">
+      <label>Ton pseudo</label>
+      <input type="text" id="login-pseudo" placeholder="ex: NarutoFan42" maxlength="20" autocomplete="off"/>
+    </div>
+    <div class="form-group">
+      <label>Choisis ton avatar</label>
+      <div class="avatar-grid" id="avatar-grid"></div>
+    </div>
+    <button class="btn btn-primary full" onclick="Auth.loginAsPlayer()">🚀 C'est parti !</button>
+  </div>
+</div>
+
+<!-- SCREEN: ADMIN LOGIN -->
+<div id="screen-admin-login" class="screen">
+  <div class="screen-header">
+    <button class="back-btn" onclick="App.showScreen('home')">← Retour</button>
+    <h2>Connexion Admin</h2>
+  </div>
+  <div class="login-form">
+    <div class="form-group">
+      <label>Email</label>
+      <input type="email" id="admin-email" placeholder="admin@evg.fr" autocomplete="off"/>
+    </div>
+    <div class="form-group">
+      <label>Mot de passe</label>
+      <input type="password" id="admin-password" placeholder="••••••••"/>
+    </div>
+    <div id="admin-error" class="error-msg hidden"></div>
+    <button class="btn btn-primary full" onclick="Auth.loginAsAdmin()">🔐 Connexion</button>
+  </div>
+</div>
+
+<!-- SCREEN: PLAYER LOBBY -->
+<div id="screen-player-lobby" class="screen">
+  <div class="screen-header">
+    <div class="player-header-info">
+      <div class="player-avatar-small" id="lobby-avatar"></div>
+      <span id="lobby-pseudo"></span>
+    </div>
+    <button class="btn-icon" onclick="Auth.logout()">⏻</button>
+  </div>
+  <div class="lobby-content">
+    <div class="lobby-score-card">
+      <div class="score-big" id="lobby-score">0</div>
+      <div class="score-label">points</div>
+    </div>
+    <div class="lobby-team-card" id="lobby-team-card">
+      <div class="team-label">Mon équipe</div>
+      <div class="team-name" id="lobby-team-name">Sans équipe</div>
+    </div>
+    <div class="lobby-section-title">Modes de jeu</div>
+    <div class="mode-cards">
+      <div class="mode-card" onclick="App.showGameSetup('normal')">
+        <div class="mode-icon">🎯</div>
+        <div class="mode-name">Mode Normal</div>
+        <div class="mode-desc">4 choix, points selon difficulté</div>
+      </div>
+      <div class="mode-card" onclick="App.showGameSetup('blind')">
+        <div class="mode-icon">🙈</div>
+        <div class="mode-name">Mode Aveugle</div>
+        <div class="mode-desc">Réponds avant l'affichage des choix ×4</div>
+      </div>
+      <div class="mode-card" onclick="App.showGameSetup('speed')">
+        <div class="mode-icon">⚡</div>
+        <div class="mode-name">Mode Rapidité</div>
+        <div class="mode-desc">Top 3 seulement : 5/4/3 pts</div>
+      </div>
+    </div>
+    <button class="btn btn-ghost full mt" onclick="App.showLeaderboard()">🏆 Classements</button>
+  </div>
+</div>
+
+<!-- SCREEN: GAME SETUP -->
+<div id="screen-game-setup" class="screen">
+  <div class="screen-header">
+    <button class="back-btn" id="setup-back-btn">← Retour</button>
+    <h2 id="setup-title">Configuration</h2>
+  </div>
+  <div class="setup-content">
+    <div class="form-group">
+      <label>Nombre de questions</label>
+      <div class="btn-group" id="setup-count">
+        <button class="btn-toggle active" data-val="5">5</button>
+        <button class="btn-toggle" data-val="10">10</button>
+        <button class="btn-toggle" data-val="15">15</button>
+        <button class="btn-toggle" data-val="105">Toutes</button>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Thème</label>
+      <div class="btn-group wrap" id="setup-theme">
+        <button class="btn-toggle active" data-val="all">Tous</button>
+        <button class="btn-toggle" data-val="manga">Mangas</button>
+        <button class="btn-toggle" data-val="jv">Jeux Vidéo</button>
+        <button class="btn-toggle" data-val="roman">Romans</button>
+        <button class="btn-toggle" data-val="series">Séries & Animation</button>
+        <button class="btn-toggle" data-val="gameplay">Gameplay/Secrets</button>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Difficulté</label>
+      <div class="btn-group" id="setup-difficulty">
+        <button class="btn-toggle active" data-val="all">Toutes</button>
+        <button class="btn-toggle" data-val="debutant">Débutant</button>
+        <button class="btn-toggle" data-val="connaisseur">Connaisseur</button>
+        <button class="btn-toggle" data-val="otaku">Otaku</button>
+      </div>
+    </div>
+    <button class="btn btn-primary full mt" onclick="Game.startGame()">🎮 Lancer !</button>
+  </div>
+</div>
+
+<!-- SCREEN: GAME -->
+<div id="screen-game" class="screen">
+  <div class="game-header">
+    <div class="game-progress">
+      <span id="game-q-num">Q1</span>/<span id="game-q-total">10</span>
+    </div>
+    <div class="game-timer-wrap">
+      <svg class="timer-ring" viewBox="0 0 44 44">
+        <circle class="timer-bg" cx="22" cy="22" r="19"/>
+        <circle class="timer-arc" id="timer-arc" cx="22" cy="22" r="19"/>
+      </svg>
+      <span id="game-timer">20</span>
+    </div>
+    <div class="game-score-display">
+      <span id="game-current-score">0</span> pts
+    </div>
+  </div>
+
+  <div class="game-body">
+    <div class="difficulty-badge" id="game-difficulty-badge">Débutant</div>
+    <div class="game-question" id="game-question">La question s'affiche ici</div>
+
+    <!-- Mode aveugle: zone de réponse libre -->
+    <div class="blind-input-zone hidden" id="blind-input-zone">
+      <input type="text" id="blind-answer" placeholder="Ta réponse..." autocomplete="off"/>
+      <button class="btn btn-primary" onclick="Game.submitBlindAnswer()">✓ Valider</button>
+      <div class="blind-countdown" id="blind-countdown"></div>
+    </div>
+
+    <div class="answers-grid" id="answers-grid"></div>
+
+    <div class="answer-feedback hidden" id="answer-feedback">
+      <div class="feedback-icon" id="feedback-icon"></div>
+      <div class="feedback-text" id="feedback-text"></div>
+      <div class="feedback-focus" id="feedback-focus"></div>
+    </div>
+  </div>
+</div>
+
+<!-- SCREEN: GAME END -->
+<div id="screen-game-end" class="screen">
+  <div class="end-content">
+    <div class="end-trophy">🏆</div>
+    <h2 class="end-title">Partie terminée !</h2>
+    <div class="end-score-card">
+      <div class="end-score" id="end-score">0</div>
+      <div class="end-score-label">points gagnés</div>
+    </div>
+    <div class="end-stats" id="end-stats"></div>
+    <div class="end-buttons">
+      <button class="btn btn-primary" onclick="App.showLeaderboard()">🏆 Classement</button>
+      <button class="btn btn-ghost" onclick="App.backToLobby()">🎮 Rejouer</button>
+    </div>
+  </div>
+</div>
+
+<!-- SCREEN: LEADERBOARD -->
+<div id="screen-leaderboard" class="screen">
+  <div class="screen-header">
+    <button class="back-btn" onclick="App.backToLobby()">← Retour</button>
+    <h2>🏆 Classements</h2>
+  </div>
+  <div class="leaderboard-tabs">
+    <button class="tab active" onclick="Leaderboard.show('players')" id="tab-players">Joueurs</button>
+    <button class="tab" onclick="Leaderboard.show('teams')" id="tab-teams">Équipes</button>
+  </div>
+  <div class="leaderboard-list" id="leaderboard-list"></div>
+</div>
+
+<!-- SCREEN: ADMIN PANEL -->
+<div id="screen-admin" class="screen">
+  <div class="screen-header">
+    <button class="back-btn" onclick="Auth.logout()">⏻ Déco</button>
+    <h2>🛠 Panel Admin</h2>
+  </div>
+  <div class="admin-tabs">
+    <button class="tab active" onclick="Admin.showTab('players')" id="atab-players">Joueurs</button>
+    <button class="tab" onclick="Admin.showTab('teams')" id="atab-teams">Équipes</button>
+    <button class="tab" onclick="Admin.showTab('questions')" id="atab-questions">Questions</button>
+    <button class="tab" onclick="Admin.showTab('game')" id="atab-game">Partie</button>
+  </div>
+  <div class="admin-content" id="admin-content"></div>
+</div>
+
+<!-- MODAL: Generic -->
+<div id="modal-overlay" class="modal-overlay hidden" onclick="Modal.close()">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <div class="modal-title" id="modal-title"></div>
+    <div class="modal-body" id="modal-body"></div>
+    <div class="modal-footer" id="modal-footer"></div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div id="toast" class="toast hidden"></div>
+
+<!-- Firebase SDK -->
+<script type="module" src="js/firebase-config.js"></script>
+<script type="module" src="js/data.js"></script>
+<script type="module" src="js/avatars.js"></script>
+<script type="module" src="js/auth.js"></script>
+<script type="module" src="js/game.js"></script>
+<script type="module" src="js/leaderboard.js"></script>
+<script type="module" src="js/admin.js"></script>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
