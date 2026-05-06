@@ -15,14 +15,13 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
 import { getFirestore } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 import { getAuth } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
-// ⚠️ REMPLACE CES VALEURS PAR TA CONFIG FIREBASE ⚠️
 const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_PROJECT_ID.appspot.com",
-  messagingSenderId: "YOUR_SENDER_ID",
-  appId: "YOUR_APP_ID"
+  apiKey: "AIzaSyA7_rx3GafLOKA47Yds2lemv7I5AEJ8Rxk",
+  authDomain: "quiz-geek-985c5.firebaseapp.com",
+  projectId: "quiz-geek-985c5",
+  storageBucket: "quiz-geek-985c5.firebasestorage.app",
+  messagingSenderId: "743706633379",
+  appId: "1:743706633379:web:bbe422ea863a00c1990b16"
 };
 
 const app = initializeApp(firebaseConfig);
