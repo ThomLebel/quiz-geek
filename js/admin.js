@@ -1,15 +1,14 @@
 // ═══════════════════════════════════════════
 // ADMIN MODULE v3 — Pause, team score dynamique, meilleurs contrôles
 // ═══════════════════════════════════════════
-import { db } from './firebase-config.js';
+import { db } from './firebase-config.js?v=8';
 import {
   doc, setDoc, updateDoc, deleteDoc, getDoc, getDocs,
   collection, query, orderBy, addDoc, onSnapshot,
   serverTimestamp, increment
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
-
-let adminGameUnsub = null;
 let adminNextTimer = null;
+let adminGameUnsub = null;
 
 export const Admin = {
   currentTab: 'game',
@@ -155,8 +154,12 @@ export const Admin = {
     const readyCount = Object.keys(state.readyPlayers || {}).length;
     const answerCount = Object.keys(state.answers || {}).length;
 
-    const readyChips = Object.values(state.readyPlayers || {})
-      .map(p => `<div class="ready-chip ready">👤 ${p}</div>`).join('');
+    const readyChips = Object.values(state.readyPlayers || {}).filter(Boolean)
+      .map(p => {
+        const pseudo = typeof p === 'object' ? p.pseudo : p;
+        const av = (window.AVATARS || []).find(a => a.id === (typeof p === 'object' ? p.avatarId : null));
+        return `<div class="ready-chip ready">${av ? `<div style="width:24px;height:24px;border-radius:50%;overflow:hidden;display:inline-block;vertical-align:middle;margin-right:6px">${av.svg}</div>` : '👤'} ${pseudo}</div>`;
+      }).join('');
 
     const answerRows = Object.entries(state.answers || {})
       .map(([,a]) => `<div class="live-answer-row">${a.isCorrect?'✅':'❌'} <span>${a.pseudo}</span></div>`)
@@ -235,11 +238,25 @@ export const Admin = {
 
   async nextQuestion() {
     if (adminNextTimer) clearTimeout(adminNextTimer);
-    await updateDoc(doc(db,'game','current'), {
-      status: 'reveal', nextQuestionIn: Date.now() + 3000
+    // Snapshot des rangs actuels avant reveal
+    const pSnap = await getDocs(collection(db, 'players'));
+    const snap = await getDoc(doc(db, 'game', 'current'));
+    const state = snap.data();
+    const ready = Object.keys(state.readyPlayers || {});
+    const players = pSnap.docs
+      .map(d => ({ uid: d.id, ...d.data() }))
+      .filter(p => ready.includes(p.uid))
+      .sort((a, b) => b.score - a.score);
+    const prevRanks = {};
+    players.forEach((p, i) => { prevRanks[p.uid] = i; });
+
+    await updateDoc(doc(db, 'game', 'current'), {
+      status: 'reveal',
+      prevRanks,
+      nextQuestionIn: Date.now() + 8500  // 2.5s résultats + 3s classement + 3s décompte
     });
-    // Auto advance after 3s
-    adminNextTimer = setTimeout(() => Admin.launchNext(), 3000);
+    // Auto advance après que les 3 phases clients se soient jouées (~8.5s)
+    adminNextTimer = setTimeout(() => Admin.launchNext(), 8500);
   },
 
   async pauseGame() {
@@ -275,7 +292,8 @@ export const Admin = {
     if (adminNextTimer) clearTimeout(adminNextTimer);
     // Build final scores: sum player scores for those in the game
     const pSnap = await getDocs(collection(db,'players'));
-    const readyPseudos = Object.values(state.readyPlayers || {});
+    const readyPseudos = Object.values(state.readyPlayers || {})
+      .map(p => typeof p === 'object' ? p.pseudo : p);
     const finalScores = {};
     pSnap.docs.forEach(d => {
       if (readyPseudos.includes(d.data().pseudo)) {

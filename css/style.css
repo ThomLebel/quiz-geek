@@ -99,11 +99,33 @@ input, select, textarea { font-family: inherit; font-size: var(--font-base); }
 .hidden { display: none !important; }
 
 /* ═══════════════ AVATAR GRID ═══════════════ */
+/* ─── Avatar grid ─── */
 .avatar-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
-.avatar-item { aspect-ratio: 1; border-radius: 50%; border: 3px solid var(--border); cursor: pointer; overflow: hidden; transition: all .2s; background: var(--card); }
-.avatar-item:hover { border-color: var(--text2); transform: scale(1.05); }
-.avatar-item.selected { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(247,201,72,.4); }
+
+/* Le wrapper cliquable inclut le cercle + le nom */
+.avatar-item-wrap {
+  display: flex; flex-direction: column; align-items: center; gap: 5px;
+  cursor: pointer;
+}
+
+/* Le cercle lui-même */
+.avatar-item {
+  width: 100%; aspect-ratio: 1; border-radius: 50%;
+  border: 3px solid var(--border); overflow: hidden;
+  transition: all .2s; background: var(--card);
+  display: flex; align-items: center; justify-content: center;
+}
 .avatar-item svg { width: 100%; height: 100%; display: block; }
+.avatar-item-wrap:hover .avatar-item { border-color: var(--text2); transform: scale(1.05); }
+.avatar-item-wrap.selected .avatar-item { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(247,201,72,.4); }
+
+/* Nom sous le cercle */
+.avatar-name {
+  font-size: 10px; font-weight: 800; color: var(--text2);
+  text-align: center; line-height: 1.2;
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.avatar-item-wrap.selected .avatar-name { color: var(--accent); }
 
 /* ═══════════════ EXISTING PLAYERS ═══════════════ */
 .existing-players-list { display: flex; flex-direction: column; gap: 12px; }
@@ -171,9 +193,14 @@ input, select, textarea { font-family: inherit; font-size: var(--font-base); }
 .timer-bg { fill: none; stroke: var(--border); stroke-width: 4; }
 .timer-arc { fill: none; stroke: var(--accent); stroke-width: 4; stroke-linecap: round; stroke-dasharray: 138.2; /* 2π×22 */ stroke-dashoffset: 0; transition: stroke .3s; }
 .timer-arc.warning { stroke: var(--accent2); }
-.timer-arc.danger { stroke: var(--error); animation: timer-pulse .5s ease infinite alternate; }
-@keyframes timer-pulse { from { opacity: 1; } to { opacity: .5; } }
-#game-timer { position: relative; font-family: 'Bangers', cursive; font-size: 24px; color: var(--text); z-index: 1; }
+.timer-arc.danger { stroke: var(--error); }
+#game-timer { position: relative; font-family: 'Bangers', cursive; font-size: 24px; color: var(--text); z-index: 1; transition: color .1s; }
+/* Wrap pulses when danger */
+.game-timer-wrap.danger { animation: timer-wrap-pulse .5s ease infinite alternate; }
+@keyframes timer-wrap-pulse {
+  from { transform: scale(1); }
+  to { transform: scale(1.15); }
+}
 
 .game-score-display { font-weight: 900; font-size: 16px; color: var(--accent); }
 
@@ -232,6 +259,47 @@ input, select, textarea { font-family: inherit; font-size: var(--font-base); }
 /* Leave game button */
 .game-leave-btn { position: fixed; bottom: 16px; right: 16px; z-index: 40; background: var(--card); border: 1.5px solid var(--border); color: var(--text3); border-radius: 24px; padding: 8px 16px; font-size: var(--font-xs); font-weight: 800; cursor: pointer; transition: all .2s; }
 .game-leave-btn:hover { border-color: var(--error); color: var(--error); }
+
+/* ═══════════════ REVEAL SCREEN ═══════════════ */
+#screen-game-reveal { background: var(--bg); align-items: center; justify-content: center; }
+#screen-game-reveal > div { width: 100%; max-width: 500px; padding: 28px 20px; animation: slide-up .35s ease; }
+@keyframes slide-up { from { opacity:0; transform:translateY(16px); } to { opacity:1; transform:translateY(0); } }
+
+/* Phase 1 */
+.reveal-header { background: var(--card); border: 2px solid var(--success); border-radius: var(--r); padding: 20px; margin-bottom: 16px; text-align: center; }
+.reveal-answer-label { font-size: 11px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase; color: var(--text3); margin-bottom: 8px; }
+.reveal-correct-answer { font-size: 22px; font-weight: 900; color: var(--success); margin-bottom: 8px; }
+.reveal-focus { font-size: 13px; color: var(--text2); line-height: 1.5; }
+
+.reveal-my-result { display: flex; align-items: center; justify-content: center; gap: 12px; background: var(--card2); border-radius: var(--r); padding: 16px; margin-bottom: 16px; }
+.reveal-my-icon { font-size: 32px; }
+.reveal-my-text { font-family: 'Bangers', cursive; font-size: 28px; color: var(--accent); letter-spacing: 1px; }
+
+.reveal-players-list { display: flex; flex-direction: column; gap: 8px; }
+.reveal-player-row { display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: var(--card); border-radius: var(--r-sm); border: 1px solid var(--border); }
+.reveal-player-icon { font-size: 20px; flex-shrink: 0; }
+.reveal-player-name { flex: 1; font-weight: 800; font-size: 15px; }
+.reveal-player-pts { font-family: 'Bangers', cursive; font-size: 22px; color: var(--accent); flex-shrink: 0; }
+
+/* Phase 2 — classement animé */
+.reveal-lb-title { font-family: 'Bangers', cursive; font-size: 32px; letter-spacing: 3px; color: var(--accent); text-align: center; margin-bottom: 20px; }
+.reveal-leaderboard { display: flex; flex-direction: column; gap: 10px; }
+.reveal-lb-row { display: flex; align-items: center; gap: 12px; padding: 14px 16px; background: var(--card); border-radius: var(--r); border: 1.5px solid var(--border); animation: row-in .4s ease both; }
+.reveal-lb-row.me { border-color: var(--accent3); }
+@keyframes row-in { from { opacity:0; transform: translateX(-20px); } to { opacity:1; transform: translateX(0); } }
+.reveal-lb-rank { font-family: 'Bangers', cursive; font-size: 26px; width: 30px; text-align: center; color: var(--text2); flex-shrink: 0; }
+.reveal-lb-avatar { width: 40px; height: 40px; border-radius: 50%; overflow: hidden; border: 2px solid var(--border); flex-shrink: 0; }
+.reveal-lb-avatar svg { width: 100%; height: 100%; display: block; }
+.reveal-lb-name { flex: 1; font-weight: 800; font-size: 15px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.reveal-lb-arrow { font-size: 18px; font-weight: 900; width: 20px; text-align: center; flex-shrink: 0; }
+.reveal-lb-score { font-family: 'Bangers', cursive; font-size: 26px; color: var(--accent); flex-shrink: 0; }
+
+/* Phase 3 — décompte */
+#reveal-phase3 { text-align: center; }
+.reveal-next-label { font-family: 'Bangers', cursive; font-size: 28px; letter-spacing: 2px; color: var(--text2); margin-bottom: 20px; }
+.reveal-countdown { font-family: 'Bangers', cursive; font-size: 120px; color: var(--accent); line-height: 1; animation: countdown-pop .9s ease infinite alternate; text-shadow: 0 0 40px rgba(247,201,72,.5); }
+@keyframes countdown-pop { from { transform: scale(1); } to { transform: scale(1.08); } }
+.reveal-countdown-sub { font-size: 16px; color: var(--text2); font-weight: 700; margin-top: 8px; }
 
 /* ═══════════════ GAME END ═══════════════ */
 #screen-game-end { align-items: center; justify-content: center; background: var(--bg); overflow-y: auto; }

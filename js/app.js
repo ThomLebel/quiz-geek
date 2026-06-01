@@ -1,12 +1,12 @@
 // ═══════════════════════════════════════════
 // APP MODULE v2
 // ═══════════════════════════════════════════
-import { Auth } from './auth.js';
-import { Game } from './game.js';
-import { Leaderboard } from './leaderboard.js';
-import { Admin } from './admin.js';
-import { AVATARS } from './avatars.js';
-import { db } from './firebase-config.js';
+import { Auth } from './auth.js?v=10';
+import { Game } from './game.js?v=10';
+import { Leaderboard } from './leaderboard.js?v=10';
+import { Admin } from './admin.js?v=10';
+import { AVATARS } from './avatars.js?v=10';
+import { db } from './firebase-config.js?v=10';
 import { collection, getDocs, query, orderBy } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
 window.Modal = {
@@ -51,16 +51,17 @@ window.App = {
     const grid = document.getElementById(`avatar-grid-${suffix}`);
     if (!grid) return;
     grid.innerHTML = AVATARS.map(av => `
-      <div class="avatar-item" data-avatar-id="${av.id}" title="${av.name}"
+      <div class="avatar-item-wrap" data-avatar-id="${av.id}"
            onclick="App.selectAvatar('${av.id}', this, '${suffix}')">
-        ${av.svg}
+        <div class="avatar-item">${av.svg}</div>
+        <div class="avatar-name">${av.name}</div>
       </div>
     `).join('');
-    grid.querySelector('.avatar-item')?.classList.add('selected');
+    grid.querySelector('.avatar-item-wrap')?.classList.add('selected');
   },
 
   selectAvatar(id, el, suffix) {
-    document.querySelectorAll(`#avatar-grid-${suffix} .avatar-item`).forEach(i => i.classList.remove('selected'));
+    document.querySelectorAll(`#avatar-grid-${suffix} .avatar-item-wrap`).forEach(i => i.classList.remove('selected'));
     el.classList.add('selected');
   },
 

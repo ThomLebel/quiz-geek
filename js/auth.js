@@ -1,7 +1,7 @@
 // ═══════════════════════════════════════════
 // AUTH MODULE v2 — Pseudo + mot de passe, reconnexion profil
 // ═══════════════════════════════════════════
-import { db, auth } from './firebase-config.js';
+import { db, auth } from './firebase-config.js?v=10';
 import {
   signInWithEmailAndPassword, signOut, onAuthStateChanged
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
@@ -130,7 +130,7 @@ export const Auth = {
     if (!pseudo || pseudo.length < 2) { errEl.textContent = 'Pseudo trop court (min 2 caractères).'; errEl.classList.remove('hidden'); return; }
     if (!pw || pw.length < 4) { errEl.textContent = 'Mot de passe trop court (min 4 caractères).'; errEl.classList.remove('hidden'); return; }
 
-    const selectedAv = document.querySelector('#avatar-grid-new .avatar-item.selected');
+    const selectedAv = document.querySelector('#avatar-grid-new .avatar-item-wrap.selected');
     if (!selectedAv) { errEl.textContent = 'Choisis un avatar.'; errEl.classList.remove('hidden'); return; }
     const avatarId = selectedAv.dataset.avatarId;
 

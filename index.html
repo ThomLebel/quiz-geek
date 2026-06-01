@@ -212,6 +212,36 @@
   <button class="game-leave-btn" onclick="Game.requestLeave()">Quitter ✕</button>
 </div>
 
+<!-- GAME REVEAL — 3 phases -->
+<div id="screen-game-reveal" class="screen">
+  <!-- Phase 1 : résultats de la question -->
+  <div id="reveal-phase1">
+    <div class="reveal-header">
+      <div class="reveal-answer-label">Bonne réponse</div>
+      <div class="reveal-correct-answer" id="reveal-correct-answer"></div>
+      <div class="reveal-focus" id="reveal-focus"></div>
+    </div>
+    <div class="reveal-my-result" id="reveal-my-result">
+      <span class="reveal-my-icon" id="reveal-my-result-icon"></span>
+      <span class="reveal-my-text" id="reveal-my-result-text"></span>
+    </div>
+    <div class="reveal-players-list" id="reveal-players-list"></div>
+  </div>
+
+  <!-- Phase 2 : classement animé -->
+  <div id="reveal-phase2" class="hidden">
+    <div class="reveal-lb-title">🏆 Classement</div>
+    <div class="reveal-leaderboard" id="reveal-leaderboard"></div>
+  </div>
+
+  <!-- Phase 3 : décompte -->
+  <div id="reveal-phase3" class="hidden">
+    <div class="reveal-next-label" id="reveal-next-label"></div>
+    <div class="reveal-countdown" id="reveal-countdown">3</div>
+    <div class="reveal-countdown-sub">secondes…</div>
+  </div>
+</div>
+
 <!-- GAME END -->
 <div id="screen-game-end" class="screen">
   <div class="end-content">
@@ -272,13 +302,13 @@
 <!-- TOAST -->
 <div id="toast" class="toast hidden"></div>
 
-<script type="module" src="js/firebase-config.js"></script>
-<script type="module" src="js/data.js"></script>
-<script type="module" src="js/avatars.js"></script>
-<script type="module" src="js/auth.js"></script>
-<script type="module" src="js/game.js"></script>
-<script type="module" src="js/leaderboard.js"></script>
-<script type="module" src="js/admin.js"></script>
-<script type="module" src="js/app.js"></script>
+<script type="module" src="js/firebase-config.js?v=10"></script>
+<script type="module" src="js/data.js?v=10"></script>
+<script type="module" src="js/avatars.js?v=10"></script>
+<script type="module" src="js/auth.js?v=10"></script>
+<script type="module" src="js/game.js?v=10"></script>
+<script type="module" src="js/leaderboard.js?v=10"></script>
+<script type="module" src="js/admin.js?v=10"></script>
+<script type="module" src="js/app.js?v=10"></script>
 </body>
 </html>

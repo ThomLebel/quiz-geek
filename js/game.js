@@ -1,130 +1,509 @@
 // ═══════════════════════════════════════════
-// GAME ENGINE v3
-// Fixes: timer SVG animation, blind mode rewrite, pause, leave, lobby redirect
+// GAME ENGINE v3.1 — Architecture claire, timer robuste
+//
+// Principe :
+//   • onSnapshot reçoit chaque changement Firestore
+//   • handleGameState dispatch selon state.status
+//   • 'question' → renderQuestion() une seule fois par questionIndex
+//                   puis updateAnswersOnly() pour les snapshots suivants
+//   • Le timer est un setInterval autonome lancé une fois par question,
+//     jamais relancé par un snapshot intermédiaire
+//   • Quand le timer arrive à 0, c'est l'ADMIN qui fait passer en 'reveal'
+//     (pas le client). Le client attend juste le prochain snapshot.
 // ═══════════════════════════════════════════
-import { db } from './firebase-config.js';
+import { db } from './firebase-config.js?v=8';
 import {
-  doc, updateDoc, getDoc, onSnapshot, increment, collection, getDocs
+  doc, updateDoc, getDoc, onSnapshot, increment, getDocs, collection
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-// r=22 → circumference = 2π×22 ≈ 138.23
-const CIRC = 2 * Math.PI * 22;
+const CIRC = 2 * Math.PI * 22; // r=22 → ≈138.2
 
-let local = {
-  answered: false,
-  blindCorrect: false,
-  blindRevealed: false,
+// ── État local du joueur (réinitialisé à chaque question)
+let L = {
+  // Session
   sessionScore: 0,
   sessionCorrect: 0,
   sessionTotal: 0,
-  rafId: null,
-  pausedAt: null,
-  pauseElapsed: 0   // ms already elapsed before pause
+  // Question en cours
+  questionIndex: -1,      // index de la question actuellement affichée
+  answered: false,        // a-t-il répondu ?
+  blindCorrect: false,    // a-t-il trouvé en mode aveugle ?
+  scoreThisQ: 0,          // points gagnés cette question (calculé au reveal)
+  scored: false,          // a-t-on déjà compté cette question ?
+  // Timer
+  timerInterval: null,
+  isPaused: false,
+  // Firestore
+  _unsub: null
 };
 
+function stopTimer() {
+  if (L.timerInterval) { clearTimeout(L.timerInterval); clearInterval(L.timerInterval); L.timerInterval = null; }
+}
+
+// ══════════════════════════════════════════════════════
+// EXPORT
+// ══════════════════════════════════════════════════════
 export const Game = {
   _unsubGame: null,
 
-  // ──────────────────────────────────────────
-  // LISTEN
-  // ──────────────────────────────────────────
+  // ─────────────────────────────────────────
+  // ÉCOUTE FIRESTORE
+  // ─────────────────────────────────────────
   listenToGameState() {
     if (Game._unsubGame) Game._unsubGame();
     Game._unsubGame = onSnapshot(doc(db, 'game', 'current'), snap => {
       if (!snap.exists()) {
-        // No active game — update lobby banner and go to lobby if on game screen
         document.getElementById('lobby-game-status')?.classList.add('hidden');
         const active = document.querySelector('.screen.active')?.id;
-        if (['screen-game','screen-game-waiting'].includes(active)) {
+        if (['screen-game', 'screen-game-waiting', 'screen-game-reveal'].includes(active)) {
+          stopTimer();
           window.App.toast('La partie a été arrêtée.');
           window.App.backToLobby();
         }
         return;
       }
-      Game.handleGameState(snap.data());
+      Game._dispatch(snap.data());
     });
   },
 
-  handleGameState(state) {
+  _dispatch(state) {
+    console.log('[DISPATCH] status=', state.status, 'questionIndex=', state.questionIndex, 'L.questionIndex=', L.questionIndex);
+    // Pause overlay
+    document.getElementById('pause-overlay')?.classList.toggle('hidden', state.status !== 'paused');
+    L.isPaused = (state.status === 'paused');
+
     const active = document.querySelector('.screen.active')?.id;
 
-    // Pause overlay (any screen during game)
-    const pauseEl = document.getElementById('pause-overlay');
-    if (pauseEl) pauseEl.classList.toggle('hidden', state.status !== 'paused');
-
     switch (state.status) {
+      // ── Salle d'attente
       case 'waiting':
         document.getElementById('lobby-game-status')?.classList.remove('hidden');
         document.getElementById('game-status-title').textContent = '🎮 Partie configurée !';
         document.getElementById('game-status-sub').textContent =
-          `${Game._modeLabel(state.mode)} · ${state.questionCount} questions · ${state.timerSeconds}s/question`;
-        if (active === 'screen-game-waiting') Game.updateWaitingScreen(state);
+          `${_modeLabel(state.mode)} · ${state.questionCount} questions · ${state.timerSeconds}s/q`;
+        if (active === 'screen-game-waiting') Game._updateWaitingPlayers(state);
         break;
 
-      case 'paused':
-        // Timer is frozen — handled by pause overlay above
-        // Resume local RAF when unpaused
-        local.pauseElapsed += Date.now() - (local.pausedAt || Date.now());
-        local.pausedAt = Date.now();
-        if (active !== 'screen-game') {
-          window.App.showScreen('game');
-          Game.renderQuestion(state);
-        }
-        break;
-
+      // ── Question
       case 'question':
         if (active !== 'screen-game') {
-          Game._resetLocalSession(state);
+          if (state.questionIndex === 0) _resetSession();
           window.App.showScreen('game');
         }
-        local.pausedAt = null;
-        Game.renderQuestion(state);
+        if (state.questionIndex !== L.questionIndex) {
+          // Nouvelle question : render complet + démarrer timer
+          L.questionIndex = state.questionIndex;
+          L.answered = !!(state.answers?.[window.currentUser?.uid]);
+          L.blindCorrect = !!(state.answers?.[window.currentUser?.uid]?.blindMode);
+          L.scored = false;
+          L.scoreThisQ = 0;
+          Game._renderQuestion(state);
+          _startTimer(state);
+        } else {
+          // Même question, quelqu'un a répondu → mettre à jour les boutons si nécessaire
+          Game._onAnswerUpdate(state);
+        }
         break;
 
-      case 'reveal':
+      // ── Pause : timer gelé, on ne fait rien d'autre
+      case 'paused':
         if (active !== 'screen-game') window.App.showScreen('game');
-        Game.revealAnswer(state);
         break;
 
+      // ── Révélation des résultats
+      case 'reveal':
+        stopTimer();
+        L.questionIndex = -1; // force re-render à la prochaine question
+        if (active !== 'screen-game') window.App.showScreen('game');
+        Game._renderReveal(state);
+        break;
+
+      // ── Fin de partie
       case 'finished':
-        Game.showEndScreen(state);
+        stopTimer();
+        Game._showEnd(state);
         break;
     }
   },
 
-  _modeLabel(mode) {
-    return mode === 'normal' ? '🎯 Normal' : mode === 'blind' ? '🙈 Aveugle' : '⚡ Rapidité';
+  // ─────────────────────────────────────────
+  // RENDER QUESTION
+  // ─────────────────────────────────────────
+  _renderQuestion(state) {
+    const q = state.currentQuestion;
+
+    document.getElementById('game-q-num').textContent = state.questionIndex + 1;
+    document.getElementById('game-q-total').textContent = state.questionCount;
+    document.getElementById('game-current-score').textContent = L.sessionScore;
+
+    const badge = document.getElementById('game-difficulty-badge');
+    badge.textContent = window.DIFFICULTY_LABELS?.[q.difficulty] || q.difficulty;
+    badge.className = `difficulty-badge ${q.difficulty}`;
+
+    document.getElementById('game-question').textContent = q.question;
+    document.getElementById('answer-feedback').classList.add('hidden');
+    document.getElementById('speed-live-bar').classList.toggle('hidden', state.mode !== 'speed');
+
+    // ── Mode aveugle
+    const blindZone = document.getElementById('blind-zone');
+    const answersGrid = document.getElementById('answers-grid');
+
+    if (state.mode === 'blind') {
+      blindZone.classList.remove('hidden');
+      document.getElementById('blind-attempts').innerHTML = '';
+      document.getElementById('blind-answer').value = '';
+      answersGrid.innerHTML = '';
+      answersGrid.style.display = 'none';
+
+      if (L.answered && L.blindCorrect) {
+        document.getElementById('blind-input-row').classList.add('hidden');
+        document.getElementById('blind-reveal-btn').classList.add('hidden');
+        document.getElementById('blind-attempts').innerHTML =
+          `<div class="blind-attempt-chip correct">✅ Bonne réponse !</div>`;
+      } else if (L.answered) {
+        // A répondu via les choix → montrer la grille désactivée
+        blindZone.classList.add('hidden');
+        answersGrid.style.display = 'grid';
+        _renderButtons(q.shuffledAnswers, true);
+        _highlightAnswer(state);
+      } else {
+        document.getElementById('blind-input-row').classList.remove('hidden');
+        document.getElementById('blind-reveal-btn').classList.remove('hidden');
+      }
+    } else {
+      blindZone.classList.add('hidden');
+      answersGrid.style.display = 'grid';
+      _renderButtons(q.shuffledAnswers, L.answered);
+      if (L.answered) _highlightAnswer(state);
+    }
+
+    if (state.mode === 'speed') _updateSpeedBar(state);
   },
 
-  _resetLocalSession(state) {
-    // Only reset session counters when a brand-new game starts (q0)
-    if (state.questionIndex === 0) {
-      local.sessionScore = 0;
-      local.sessionCorrect = 0;
-      local.sessionTotal = 0;
+  // Appelé sur les snapshots intermédiaires (même question, quelqu'un a répondu)
+  _onAnswerUpdate(state) {
+    if (state.mode === 'speed') _updateSpeedBar(state);
+    // Si on vient de répondre et que l'ack Firestore arrive, s'assurer que les boutons
+    // affichent bien la correction locale
+    if (L.answered && !L._highlightDone) {
+      _highlightAnswer(state);
+      L._highlightDone = true;
     }
   },
 
+  // ─────────────────────────────────────────
+  // ACTIONS JOUEUR
+  // ─────────────────────────────────────────
+  async selectAnswer(originalIdx, btn) {
+    if (L.answered) return;
+    L.answered = true;
+    L._highlightDone = false;
+
+    // Désactiver tous les boutons immédiatement
+    document.querySelectorAll('.answer-btn').forEach(b => b.disabled = true);
+
+    // Feedback visuel immédiat (avant Firestore)
+    const snap = await getDoc(doc(db, 'game', 'current'));
+    if (!snap.exists()) return;
+    const q = snap.data().currentQuestion;
+    const isCorrect = originalIdx === q.correct;
+
+    // Colorier la réponse choisie
+    btn.classList.add(isCorrect ? 'correct' : 'wrong');
+    // Si faux, colorier aussi la bonne réponse
+    if (!isCorrect) {
+      q.shuffledAnswers.forEach((ans, i) => {
+        if (ans.originalIdx === q.correct) {
+          document.querySelectorAll('.answer-btn')[i]?.classList.add('correct');
+        }
+      });
+    }
+    L._highlightDone = true;
+
+    const uid = window.currentUser?.uid;
+    await updateDoc(doc(db, 'game', 'current'), {
+      [`answers.${uid}`]: {
+        pseudo: window.currentUser.pseudo,
+        originalIdx, isCorrect, answeredAt: Date.now()
+      }
+    }).catch(() => {});
+  },
+
+  async submitBlindAnswer() {
+    if (L.answered) return;
+    const input = document.getElementById('blind-answer').value.trim();
+    if (!input) { window.App.toast('Entre une réponse !'); return; }
+
+    const snap = await getDoc(doc(db, 'game', 'current'));
+    if (!snap.exists() || snap.data().status !== 'question') return;
+    const q = snap.data().currentQuestion;
+    const isCorrect = _fuzzy(input, q.answers[q.correct]);
+
+    const chip = document.createElement('div');
+    chip.className = `blind-attempt-chip ${isCorrect ? 'correct' : 'wrong'}`;
+    chip.textContent = isCorrect ? `✅ ${input}` : `✗ ${input}`;
+    document.getElementById('blind-attempts').appendChild(chip);
+    document.getElementById('blind-answer').value = '';
+
+    if (isCorrect) {
+      L.answered = true;
+      L.blindCorrect = true;
+      document.getElementById('blind-input-row').classList.add('hidden');
+      document.getElementById('blind-reveal-btn').classList.add('hidden');
+      const uid = window.currentUser?.uid;
+      await updateDoc(doc(db, 'game', 'current'), {
+        [`answers.${uid}`]: {
+          pseudo: window.currentUser.pseudo,
+          originalIdx: q.correct,
+          isCorrect: true, blindMode: true, answeredAt: Date.now()
+        }
+      }).catch(() => {});
+    }
+  },
+
+  revealChoices() {
+    if (L.answered) return;
+    document.getElementById('blind-input-row').classList.add('hidden');
+    document.getElementById('blind-reveal-btn').classList.add('hidden');
+    getDoc(doc(db, 'game', 'current')).then(snap => {
+      if (!snap.exists()) return;
+      const grid = document.getElementById('answers-grid');
+      grid.style.display = 'grid';
+      document.getElementById('blind-zone').classList.add('hidden');
+      _renderButtons(snap.data().currentQuestion.shuffledAnswers, false);
+    });
+  },
+
+  // ─────────────────────────────────────────
+  // REVEAL — 3 phases enchaînées côté client
+  //   Phase 1 : résultats joueurs (immediate)
+  //   Phase 2 : classement animé (après 2s)
+  //   Phase 3 : décompte 3s → question suivante (après 2+3s)
+  // ─────────────────────────────────────────
+  _renderReveal(state) {
+    const q = state.currentQuestion;
+    const myAnswer = state.answers?.[window.currentUser?.uid];
+    const uid = window.currentUser?.uid;
+
+    // ── Calculer les points gagnés
+    let points = 0, isCorrect = false;
+    if (myAnswer?.isCorrect) {
+      isCorrect = true;
+      const base = window.DIFFICULTY_POINTS?.[q.difficulty] || 1;
+      if (state.mode === 'blind' && myAnswer.blindMode) points = base * 4;
+      else if (state.mode === 'speed') {
+        const ranked = Object.entries(state.answers || {})
+          .filter(([, v]) => v.isCorrect)
+          .sort((a, b) => a[1].answeredAt - b[1].answeredAt);
+        const r = ranked.findIndex(([id]) => id === uid);
+        points = r === 0 ? 5 : r === 1 ? 4 : r === 2 ? 3 : 0;
+      } else points = base;
+    }
+
+    // ── Mettre à jour le score session (une seule fois)
+    if (!L.scored) {
+      L.scored = true;
+      L.scoreThisQ = points;
+      if (isCorrect) { L.sessionScore += points; L.sessionCorrect++; }
+      L.sessionTotal++;
+      // Sauvegarder sur Firestore
+      if (uid && !window.currentUser?.isAdmin && points > 0) {
+        updateDoc(doc(db, 'players', uid), {
+          score: increment(points), correctAnswers: increment(1)
+        }).catch(() => {});
+        if (window.currentUser?.teamId) {
+          updateDoc(doc(db, 'teams', window.currentUser.teamId), {
+            score: increment(points)
+          }).catch(() => {});
+        }
+      }
+    }
+
+    document.getElementById('game-current-score').textContent = L.sessionScore;
+
+    // ════════════════════
+    // PHASE 1 : Résultats
+    // ════════════════════
+    Game._showPhase1Results(state, q, myAnswer, isCorrect, points);
+  },
+
+  _showPhase1Results(state, q, myAnswer, isCorrect, points) {
+    window.App.showScreen('game-reveal');
+
+    // Toujours réinitialiser les 3 phases
+    document.getElementById('reveal-phase1').classList.remove('hidden');
+    document.getElementById('reveal-phase2').classList.add('hidden');
+    document.getElementById('reveal-phase3').classList.add('hidden');
+
+    // Bonne réponse
+    document.getElementById('reveal-correct-answer').textContent = q.answers[q.correct];
+    document.getElementById('reveal-focus').textContent = q.focus || '';
+
+    // Ma réponse
+    const myIcon = isCorrect ? '✅' : myAnswer ? '❌' : '⏱️';
+    const myText = isCorrect
+      ? `+${points} pt${points > 1 ? 's' : ''}`
+      : myAnswer ? 'Raté' : 'Pas répondu';
+    document.getElementById('reveal-my-result-icon').textContent = myIcon;
+    document.getElementById('reveal-my-result-text').textContent = myText;
+
+    // Liste des réponses de tous les joueurs
+    const allAnswers = Object.entries(state.answers || {});
+    const readyPlayers = Object.entries(state.readyPlayers || {}).filter(([, p]) => p !== null);
+    const answeredUids = new Set(allAnswers.map(([id]) => id));
+    const noAnswer = readyPlayers.filter(([id]) => !answeredUids.has(id));
+
+    const rows = [
+      ...allAnswers.map(([, a]) => ({
+        pseudo: a.pseudo,
+        icon: a.isCorrect ? '✅' : '❌',
+        pts: a.isCorrect ? _calcPoints(state, q, a) : 0
+      })),
+      ...noAnswer.map(([, player]) => ({
+        pseudo: typeof player === 'object' ? player.pseudo : player,
+        icon: '⏱️', pts: 0
+      }))
+    ].sort((a, b) => b.pts - a.pts);
+
+    document.getElementById('reveal-players-list').innerHTML = rows.map(r => `
+      <div class="reveal-player-row">
+        <span class="reveal-player-icon">${r.icon}</span>
+        <span class="reveal-player-name">${r.pseudo}</span>
+        <span class="reveal-player-pts">${r.pts > 0 ? `+${r.pts}` : ''}</span>
+      </div>
+    `).join('');
+
+    // Phase 2 après 2.5s
+    setTimeout(() => Game._showPhase2Leaderboard(state), 2500);
+  },
+
+  async _showPhase2Leaderboard(state) {
+    // Charger les scores actuels depuis Firestore
+    const pSnap = await getDocs(collection(db, 'players'));
+    const activeUids = Object.entries(state.readyPlayers || {})
+      .filter(([, p]) => p !== null).map(([id]) => id);
+    const players = pSnap.docs.map(d => ({ uid: d.id, ...d.data() }))
+      .filter(p => activeUids.includes(p.uid))
+      .sort((a, b) => b.score - a.score);
+
+    const prevRanks = state.prevRanks || {}; // Rang avant cette question
+
+    document.getElementById('reveal-phase1').classList.add('hidden');
+    document.getElementById('reveal-phase2').classList.remove('hidden');
+
+    const list = document.getElementById('reveal-leaderboard');
+    list.innerHTML = players.map((p, i) => {
+      const prev = prevRanks[p.uid];
+      const moved = prev !== undefined ? prev - i : 0; // positif = monté
+      const arrow = moved > 0 ? '↑' : moved < 0 ? '↓' : '';
+      const arrowColor = moved > 0 ? 'var(--success)' : moved < 0 ? 'var(--error)' : 'transparent';
+      const av = (window.AVATARS || []).find(a => a.id === p.avatarId);
+      const isMe = window.currentUser?.uid === p.uid;
+      return `
+        <div class="reveal-lb-row ${isMe ? 'me' : ''}" style="animation-delay:${i * 0.08}s">
+          <span class="reveal-lb-rank">${i + 1}</span>
+          <div class="reveal-lb-avatar">${av ? av.svg : ''}</div>
+          <span class="reveal-lb-name">${p.pseudo}</span>
+          <span class="reveal-lb-arrow" style="color:${arrowColor}">${arrow}</span>
+          <span class="reveal-lb-score">${p.score}</span>
+        </div>`;
+    }).join('');
+
+    // Phase 3 après 3s
+    setTimeout(() => Game._showPhase3Countdown(state), 3000);
+  },
+
+  _showPhase3Countdown(state) {
+    document.getElementById('reveal-phase1').classList.add('hidden');
+    document.getElementById('reveal-phase2').classList.add('hidden');
+    document.getElementById('reveal-phase3').classList.remove('hidden');
+
+    const isLast = state.questionIndex + 1 >= state.questionCount;
+    document.getElementById('reveal-next-label').textContent =
+      isLast ? 'Fin de la partie !' : `Question ${state.questionIndex + 2} / ${state.questionCount}`;
+
+    let count = 3;
+    document.getElementById('reveal-countdown').textContent = count;
+    const iv = setInterval(() => {
+      count--;
+      document.getElementById('reveal-countdown').textContent = count;
+      if (count <= 0) clearInterval(iv);
+    }, 1000);
+  },
+
+  // ─────────────────────────────────────────
+  // FIN DE PARTIE
+  // ─────────────────────────────────────────
+  async _showEnd(state) {
+    const uid = window.currentUser?.uid;
+    if (uid && !window.currentUser?.isAdmin) {
+      await updateDoc(doc(db, 'players', uid), { gamesPlayed: increment(1) }).catch(() => {});
+    }
+    document.getElementById('end-score').textContent = L.sessionScore;
+    const pct = L.sessionTotal ? Math.round(L.sessionCorrect / L.sessionTotal * 100) : 0;
+    document.getElementById('end-stats').innerHTML = `
+      ✅ ${L.sessionCorrect} bonne${L.sessionCorrect > 1 ? 's' : ''} réponse${L.sessionCorrect > 1 ? 's' : ''}<br>
+      ❌ ${L.sessionTotal - L.sessionCorrect} erreur${L.sessionTotal - L.sessionCorrect !== 1 ? 's' : ''}<br>
+      📊 ${pct}% de réussite
+    `;
+    const sorted = Object.entries(state.finalScores || {})
+      .sort((a, b) => b[1].score - a[1].score).slice(0, 3);
+    const icons = ['🥇', '🥈', '🥉'];
+    document.getElementById('end-podium').innerHTML = sorted.length ? `
+      <div style="font-family:'Bangers',cursive;font-size:22px;letter-spacing:2px;color:var(--accent);margin-bottom:12px">Podium</div>
+      ${sorted.map(([, d], i) => `
+        <div class="podium-item" style="${i === 0 ? 'border-color:#ffd700' : ''}">
+          <span class="podium-rank">${icons[i]}</span>
+          <span class="podium-name">${d.pseudo}</span>
+          <span class="podium-score">${d.score}</span>
+        </div>`).join('')}
+    ` : '';
+    L.sessionScore = 0; L.sessionCorrect = 0; L.sessionTotal = 0;
+    window.App.showScreen('game-end');
+  },
+
+  // ─────────────────────────────────────────
+  // WAITING SCREEN
+  // ─────────────────────────────────────────
   joinCurrentGame() {
     window.App.showScreen('game-waiting');
     getDoc(doc(db, 'game', 'current')).then(snap => {
-      if (snap.exists()) Game.updateWaitingScreen(snap.data());
+      if (snap.exists()) Game._updateWaitingPlayers(snap.data());
     });
     const uid = window.currentUser?.uid;
-    if (uid) {
-      updateDoc(doc(db, 'game', 'current'), {
-        [`readyPlayers.${uid}`]: window.currentUser.pseudo
-      }).catch(() => {});
-    }
+    if (uid) updateDoc(doc(db, 'game', 'current'), {
+      [`readyPlayers.${uid}`]: { pseudo: window.currentUser.pseudo, avatarId: window.currentUser.avatarId }
+    }).catch(() => {});
+  },
+
+  _updateWaitingPlayers(state) {
+    const ready = Object.entries(state.readyPlayers || {}).filter(([, p]) => p !== null);
+    document.getElementById('waiting-info').innerHTML = `
+      <strong>Mode :</strong> ${_modeLabel(state.mode)}<br>
+      <strong>Questions :</strong> ${state.questionCount}<br>
+      <strong>Timer :</strong> ${state.timerSeconds}s par question
+    `;
+    document.getElementById('waiting-players').innerHTML = ready.map(([id, player]) => {
+      // Compatibilité : player peut être un objet {pseudo, avatarId} ou une string (ancienne version)
+      const pseudo = typeof player === 'object' ? player.pseudo : player;
+      const avatarId = typeof player === 'object' ? player.avatarId : null;
+      const isMe = window.currentUser?.uid === id;
+      const av = (window.AVATARS || []).find(a => a.id === avatarId);
+      return `<div class="waiting-player-chip">
+        <div class="chip-avatar">${av ? av.svg : ''}</div>
+        <span>${pseudo}${isMe ? ' (toi)' : ''}</span>
+      </div>`;
+    }).join('');
   },
 
   leaveGame() {
+    stopTimer();
+    L.questionIndex = -1;
     const uid = window.currentUser?.uid;
-    if (uid) {
-      updateDoc(doc(db, 'game', 'current'), {
-        [`readyPlayers.${uid}`]: null
-      }).catch(() => {});
-    }
+    if (uid) updateDoc(doc(db, 'game', 'current'), {
+      [`readyPlayers.${uid}`]: null
+    }).catch(() => {});
     window.App.backToLobby();
   },
 
@@ -135,385 +514,145 @@ export const Game = {
     ]);
   },
 
-  updateWaitingScreen(state) {
-    const ready = Object.entries(state.readyPlayers || {});
-    document.getElementById('waiting-info').innerHTML = `
-      <strong>Mode :</strong> ${Game._modeLabel(state.mode)}<br>
-      <strong>Questions :</strong> ${state.questionCount}<br>
-      <strong>Timer :</strong> ${state.timerSeconds}s par question
-    `;
-    document.getElementById('waiting-players').innerHTML = ready.map(([uid, pseudo]) => {
-      const isMe = window.currentUser?.uid === uid;
-      const av = isMe ? (window.AVATARS||[]).find(a=>a.id===window.currentUser?.avatarId) : null;
-      return `<div class="waiting-player-chip">
-        <div class="chip-avatar">${av ? av.svg : ''}</div>
-        <span>${pseudo}${isMe?' (toi)':''}</span>
-      </div>`;
-    }).join('');
-  },
-
-  // ──────────────────────────────────────────
-  // RENDER QUESTION
-  // ──────────────────────────────────────────
-  renderQuestion(state) {
-    const qData = state.currentQuestion;
-    if (!qData) return;
-
-    // Reset local flags for this question
-    local.answered = (state.answers?.[window.currentUser?.uid] !== undefined);
-    local.blindCorrect = local.answered && state.answers?.[window.currentUser?.uid]?.blindMode;
-    local.blindRevealed = false;
-
-    // Header
-    document.getElementById('game-q-num').textContent = state.questionIndex + 1;
-    document.getElementById('game-q-total').textContent = state.questionCount;
-    document.getElementById('game-current-score').textContent = local.sessionScore;
-
-    const badge = document.getElementById('game-difficulty-badge');
-    badge.textContent = window.DIFFICULTY_LABELS?.[qData.difficulty] || qData.difficulty;
-    badge.className = `difficulty-badge ${qData.difficulty}`;
-    document.getElementById('game-question').textContent = qData.question;
-    document.getElementById('answer-feedback').classList.add('hidden');
-
-    const blindZone = document.getElementById('blind-zone');
-    const answersGrid = document.getElementById('answers-grid');
-    const speedBar = document.getElementById('speed-live-bar');
-
-    if (state.mode === 'blind') {
-      // Reset blind UI
-      blindZone.classList.remove('hidden');
-      answersGrid.innerHTML = '';
-      answersGrid.style.display = 'none';
-      document.getElementById('blind-attempts').innerHTML = '';
-      document.getElementById('blind-answer').value = '';
-      document.getElementById('blind-input-row').classList.toggle('hidden', local.answered && local.blindCorrect);
-      document.getElementById('blind-reveal-btn').classList.toggle('hidden', local.answered);
-
-      if (local.answered && local.blindCorrect) {
-        // Already got it right — show success
-        document.getElementById('blind-attempts').innerHTML =
-          `<div class="blind-attempt-chip correct">✅ Bonne réponse !</div>`;
-      } else if (local.answered) {
-        // Answered via choices — show grid disabled
-        answersGrid.style.display = 'grid';
-        Game.renderAnswerButtons(qData.shuffledAnswers, true);
-        blindZone.classList.add('hidden');
-      }
-    } else {
-      blindZone.classList.add('hidden');
-      answersGrid.style.display = 'grid';
-      Game.renderAnswerButtons(qData.shuffledAnswers, local.answered);
-    }
-
-    speedBar.classList.toggle('hidden', state.mode !== 'speed');
-    if (state.mode === 'speed') Game.updateSpeedBar(state);
-
-    Game.startLocalTimer(state);
-  },
-
-  renderAnswerButtons(shuffledAnswers, disabled) {
-    const letters = ['A', 'B', 'C', 'D'];
-    const grid = document.getElementById('answers-grid');
-    grid.innerHTML = '';
-    shuffledAnswers.forEach((ans, i) => {
-      const btn = document.createElement('button');
-      btn.className = 'answer-btn';
-      btn.disabled = disabled;
-      btn.innerHTML = `<span class="answer-letter">${letters[i]}</span>${ans.text}`;
-      btn.onclick = () => Game.selectAnswer(ans.originalIdx, btn);
-      grid.appendChild(btn);
-    });
-  },
-
-  // ──────────────────────────────────────────
-  // ANSWER SELECTION
-  // ──────────────────────────────────────────
-  async selectAnswer(originalIdx, btn) {
-    if (local.answered) return;
-    local.answered = true;
-    cancelAnimationFrame(local.rafId);
-    document.querySelectorAll('.answer-btn').forEach(b => b.disabled = true);
-
-    const snap = await getDoc(doc(db, 'game', 'current'));
-    if (!snap.exists()) return;
-    const state = snap.data();
-    const qData = state.currentQuestion;
-    const isCorrect = originalIdx === qData.correct;
-    if (!isCorrect) btn.classList.add('wrong');
-
-    const uid = window.currentUser?.uid;
-    await updateDoc(doc(db, 'game', 'current'), {
-      [`answers.${uid}`]: {
-        pseudo: window.currentUser.pseudo,
-        originalIdx, isCorrect, answeredAt: Date.now()
-      }
-    });
-  },
-
-  // ──────────────────────────────────────────
-  // BLIND MODE
-  // ──────────────────────────────────────────
-  async submitBlindAnswer() {
-    if (local.answered) return;
-    const input = document.getElementById('blind-answer').value.trim();
-    if (!input) { window.App.toast('Entre une réponse !'); return; }
-
-    const snap = await getDoc(doc(db, 'game', 'current'));
-    if (!snap.exists() || snap.data().status !== 'question') return;
-    const state = snap.data();
-    const qData = state.currentQuestion;
-    const correct = qData.answers[qData.correct];
-    const isCorrect = Game.fuzzyMatch(input, correct);
-
-    const chip = document.createElement('div');
-    chip.className = `blind-attempt-chip ${isCorrect ? 'correct' : 'wrong'}`;
-    chip.textContent = isCorrect ? `✅ ${input}` : `✗ ${input}`;
-    document.getElementById('blind-attempts').appendChild(chip);
-    document.getElementById('blind-answer').value = '';
-
-    if (isCorrect && !local.blindCorrect) {
-      local.blindCorrect = true;
-      local.answered = true;
-      cancelAnimationFrame(local.rafId);
-      // Hide input and reveal button
-      document.getElementById('blind-input-row').classList.add('hidden');
-      document.getElementById('blind-reveal-btn').classList.add('hidden');
-
-      const uid = window.currentUser?.uid;
-      await updateDoc(doc(db, 'game', 'current'), {
-        [`answers.${uid}`]: {
-          pseudo: window.currentUser.pseudo,
-          originalIdx: qData.correct,
-          isCorrect: true, blindMode: true, answeredAt: Date.now()
-        }
-      });
-    }
-  },
-
-  // Reveal choices manually (replaces blind text input)
-  revealChoices() {
-    if (local.answered) return;
-    local.blindRevealed = true;
-    document.getElementById('blind-input-row').classList.add('hidden');
-    document.getElementById('blind-reveal-btn').classList.add('hidden');
-
-    getDoc(doc(db, 'game', 'current')).then(snap => {
-      if (!snap.exists()) return;
-      const qData = snap.data().currentQuestion;
-      const grid = document.getElementById('answers-grid');
-      grid.style.display = 'grid';
-      Game.renderAnswerButtons(qData.shuffledAnswers, false);
-    });
-  },
-
-  fuzzyMatch(input, correct) {
-    const norm = s => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
-    const a = norm(input), b = norm(correct);
-    if (a === b || b.includes(a) || a.includes(b)) return true;
-    const words = b.split(/\s+/).filter(w => w.length >= 3);
-    if (words.some(w => norm(input) === w)) return true;
-    return Game.levenshtein(a, b) <= 2;
-  },
-
-  levenshtein(a, b) {
-    const m = a.length, n = b.length;
-    const dp = Array.from({length:m+1}, (_,i) => Array.from({length:n+1}, (_,j) => i||j));
-    for (let i=1;i<=m;i++) for (let j=1;j<=n;j++)
-      dp[i][j] = a[i-1]===b[j-1] ? dp[i-1][j-1] : 1+Math.min(dp[i-1][j],dp[i][j-1],dp[i-1][j-1]);
-    return dp[m][n];
-  },
-
-  // ──────────────────────────────────────────
-  // TIMER — requestAnimationFrame for smooth animation
-  // ──────────────────────────────────────────
-  startLocalTimer(state) {
-    cancelAnimationFrame(local.rafId);
-    const arcEl = document.getElementById('timer-arc');
-    const timerEl = document.getElementById('game-timer');
-    const total = state.timerSeconds * 1000; // ms
-    const startedAt = state.questionStartedAt; // ms timestamp stored by admin
-    arcEl.style.strokeDasharray = CIRC;
-
-    const tick = () => {
-      // If paused, freeze display
-      if (state.status === 'paused') {
-        local.rafId = requestAnimationFrame(tick);
-        return;
-      }
-
-      const elapsed = Date.now() - startedAt;
-      const remaining = Math.max(0, total - elapsed);
-      const pct = remaining / total;
-
-      // Animate arc
-      arcEl.style.strokeDashoffset = CIRC * (1 - pct);
-      timerEl.textContent = Math.ceil(remaining / 1000);
-
-      arcEl.className = pct <= 0.25 ? 'timer-arc danger' : pct <= 0.5 ? 'timer-arc warning' : 'timer-arc';
-
-      if (remaining <= 0) {
-        arcEl.style.strokeDashoffset = CIRC;
-        timerEl.textContent = '0';
-        return; // Admin will trigger reveal
-      }
-
-      local.rafId = requestAnimationFrame(tick);
-    };
-
-    local.rafId = requestAnimationFrame(tick);
-  },
-
-  // ──────────────────────────────────────────
-  // REVEAL
-  // ──────────────────────────────────────────
-  revealAnswer(state) {
-    cancelAnimationFrame(local.rafId);
-    const qData = state.currentQuestion;
-
-    // Freeze timer at 0
-    const arcEl = document.getElementById('timer-arc');
-    if (arcEl) { arcEl.style.strokeDashoffset = CIRC; arcEl.className = 'timer-arc'; }
-    document.getElementById('game-timer').textContent = '0';
-
-    // Hide blind zone, show grid
-    document.getElementById('blind-zone').classList.add('hidden');
-    const grid = document.getElementById('answers-grid');
-    grid.style.display = 'grid';
-    if (!document.querySelectorAll('.answer-btn').length || grid.innerHTML === '') {
-      Game.renderAnswerButtons(qData.shuffledAnswers, true);
-    }
-    document.querySelectorAll('.answer-btn').forEach(b => b.disabled = true);
-
-    // Highlight correct
-    qData.shuffledAnswers?.forEach((ans, i) => {
-      const b = document.querySelectorAll('.answer-btn')[i];
-      if (!b) return;
-      if (ans.originalIdx === qData.correct) b.classList.add('correct');
-    });
-
-    // Calculate points
-    const myAnswer = state.answers?.[window.currentUser?.uid];
-    let points = 0, isCorrect = false;
-
-    if (myAnswer?.isCorrect) {
-      isCorrect = true;
-      const base = window.DIFFICULTY_POINTS?.[qData.difficulty] || 1;
-      if (state.mode === 'blind' && myAnswer.blindMode) {
-        points = base * 4;
-      } else if (state.mode === 'speed') {
-        const ranked = Object.entries(state.answers || {})
-          .filter(([,v]) => v.isCorrect)
-          .sort((a,b) => a[1].answeredAt - b[1].answeredAt);
-        const myRank = ranked.findIndex(([uid]) => uid === window.currentUser?.uid);
-        points = myRank === 0 ? 5 : myRank === 1 ? 4 : myRank === 2 ? 3 : 0;
-      } else {
-        points = base;
-      }
-    }
-
-    // Update session
-    if (myAnswer !== undefined || !local.answered) {
-      // Count this question
-      if (!local._countedQ) {
-        local._countedQ = true;
-        if (isCorrect) { local.sessionScore += points; local.sessionCorrect++; }
-        local.sessionTotal++;
-      }
-    }
-    local._countedQ = false;
-
-    document.getElementById('game-current-score').textContent = local.sessionScore;
-
-    // Feedback
-    const noAnswer = myAnswer === undefined;
-    document.getElementById('feedback-icon').textContent = isCorrect ? '✅' : noAnswer ? '⏱️' : '❌';
-    document.getElementById('feedback-text').textContent = isCorrect
-      ? `+${points} point${points>1?'s':''} !`
-      : noAnswer ? 'Temps écoulé !' : 'Raté…';
-    document.getElementById('feedback-focus').textContent = qData.focus || '';
-
-    const next = state.nextQuestionIn;
-    if (next) {
-      const updateCountdown = () => {
-        const r = Math.max(0, Math.ceil((next - Date.now()) / 1000));
-        document.getElementById('feedback-next').textContent =
-          r > 0 ? `Prochaine question dans ${r}s…` : '';
-        if (r > 0) setTimeout(updateCountdown, 400);
-      };
-      updateCountdown();
-    }
-
-    document.getElementById('answer-feedback').classList.remove('hidden');
-
-    // Speed bar
-    if (state.mode === 'speed') {
-      document.getElementById('speed-live-bar').classList.remove('hidden');
-      Game.updateSpeedBar(state);
-    }
-
-    // Save score to Firestore (delta)
-    const uid = window.currentUser?.uid;
-    if (uid && !window.currentUser?.isAdmin && points > 0) {
-      updateDoc(doc(db, 'players', uid), {
-        score: increment(points),
-        correctAnswers: increment(1)
-      }).catch(() => {});
-      // Update team score if in team
-      if (window.currentUser?.teamId) {
-        updateDoc(doc(db, 'teams', window.currentUser.teamId), {
-          score: increment(points)
-        }).catch(() => {});
-      }
-    }
-  },
-
-  updateSpeedBar(state) {
-    const list = document.getElementById('speed-live-list');
-    const ranked = Object.entries(state.answers || {})
-      .filter(([,v]) => v.isCorrect)
-      .sort((a,b) => a[1].answeredAt - b[1].answeredAt)
-      .slice(0, 3);
-    const icons = ['🥇','🥈','🥉'];
-    list.innerHTML = ranked.map(([uid, data], i) =>
-      `<div class="speed-winner-row"><span class="speed-pos">${icons[i]}</span><span>${data.pseudo}</span></div>`
-    ).join('') || '<div style="color:var(--text3);font-size:13px">Personne encore…</div>';
-  },
-
-  // ──────────────────────────────────────────
-  // END SCREEN
-  // ──────────────────────────────────────────
-  async showEndScreen(state) {
-    cancelAnimationFrame(local.rafId);
-    const uid = window.currentUser?.uid;
-    if (uid && !window.currentUser?.isAdmin) {
-      await updateDoc(doc(db, 'players', uid), { gamesPlayed: increment(1) }).catch(() => {});
-    }
-
-    document.getElementById('end-score').textContent = local.sessionScore;
-    const pct = local.sessionTotal ? Math.round((local.sessionCorrect/local.sessionTotal)*100) : 0;
-    document.getElementById('end-stats').innerHTML = `
-      ✅ ${local.sessionCorrect} bonne${local.sessionCorrect>1?'s':''} réponse${local.sessionCorrect>1?'s':''}<br>
-      ❌ ${local.sessionTotal - local.sessionCorrect} erreur${local.sessionTotal-local.sessionCorrect!==1?'s':''}<br>
-      📊 ${pct}% de réussite
-    `;
-
-    const sorted = Object.entries(state.finalScores || {})
-      .sort((a,b) => b[1].score - a[1].score).slice(0, 3);
-    const icons = ['🥇','🥈','🥉'];
-    document.getElementById('end-podium').innerHTML = sorted.length ? `
-      <div class="admin-section-title" style="margin-bottom:12px">Podium de la partie</div>
-      ${sorted.map(([,d], i) => `
-        <div class="podium-item" style="${i===0?'border-color:#ffd700':''}">
-          <span class="podium-rank">${icons[i]}</span>
-          <span class="podium-name">${d.pseudo}</span>
-          <span class="podium-score">${d.score}</span>
-        </div>
-      `).join('')}
-    ` : '';
-
-    local.sessionScore = 0; local.sessionCorrect = 0; local.sessionTotal = 0;
-    window.App.showScreen('game-end');
-  }
+  _modeLabel: m => _modeLabel(m)
 };
+
+// ══════════════════════════════════════════════════════
+// FONCTIONS INTERNES (hors export)
+// ══════════════════════════════════════════════════════
+
+function _resetSession() {
+  L.sessionScore = 0; L.sessionCorrect = 0; L.sessionTotal = 0;
+}
+
+function _modeLabel(mode) {
+  return mode === 'normal' ? '🎯 Normal' : mode === 'blind' ? '🙈 Aveugle' : '⚡ Rapidité';
+}
+
+function _renderButtons(shuffledAnswers, disabled) {
+  const letters = ['A', 'B', 'C', 'D'];
+  const grid = document.getElementById('answers-grid');
+  grid.innerHTML = '';
+  shuffledAnswers.forEach((ans, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'answer-btn';
+    btn.disabled = disabled;
+    btn.innerHTML = `<span class="answer-letter">${letters[i]}</span>${ans.text}`;
+    btn.onclick = () => Game.selectAnswer(ans.originalIdx, btn);
+    grid.appendChild(btn);
+  });
+}
+
+// Colorie les boutons selon la réponse du joueur (sans redraw complet)
+function _highlightAnswer(state) {
+  const q = state.currentQuestion;
+  const myAnswer = state.answers?.[window.currentUser?.uid];
+  if (!myAnswer) return;
+  const btns = document.querySelectorAll('.answer-btn');
+  btns.forEach(b => b.disabled = true);
+  q.shuffledAnswers.forEach((ans, i) => {
+    if (ans.originalIdx === q.correct) btns[i]?.classList.add('correct');
+    else if (ans.originalIdx === myAnswer.originalIdx && !myAnswer.isCorrect) btns[i]?.classList.add('wrong');
+  });
+}
+
+function _updateSpeedBar(state) {
+  const ranked = Object.entries(state.answers || {})
+    .filter(([, v]) => v.isCorrect)
+    .sort((a, b) => a[1].answeredAt - b[1].answeredAt)
+    .slice(0, 3);
+  const icons = ['🥇', '🥈', '🥉'];
+  document.getElementById('speed-live-list').innerHTML =
+    ranked.map(([, d], i) =>
+      `<div class="speed-winner-row"><span class="speed-pos">${icons[i]}</span><span>${d.pseudo}</span></div>`
+    ).join('') || '<div style="color:var(--text3);font-size:13px">Personne encore…</div>';
+}
+
+function _calcPoints(state, q, answer) {
+  if (!answer.isCorrect) return 0;
+  const base = window.DIFFICULTY_POINTS?.[q.difficulty] || 1;
+  if (state.mode === 'blind' && answer.blindMode) return base * 4;
+  if (state.mode === 'speed') {
+    const ranked = Object.entries(state.answers || {})
+      .filter(([, v]) => v.isCorrect)
+      .sort((a, b) => a[1].answeredAt - b[1].answeredAt);
+    const r = ranked.findIndex(([, v]) => v === answer);
+    return r === 0 ? 5 : r === 1 ? 4 : r === 2 ? 3 : 0;
+  }
+  return base;
+}
+
+function _fuzzy(input, correct) {
+  const n = s => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+  const a = n(input), b = n(correct);
+  if (a === b || b.includes(a) || a.includes(b)) return true;
+  if (b.split(/\s+/).filter(w => w.length >= 3).some(w => a === w)) return true;
+  const m = a.length, k = b.length;
+  const dp = Array.from({ length: m + 1 }, (_, i) => Array.from({ length: k + 1 }, (_, j) => i || j));
+  for (let i = 1; i <= m; i++) for (let j = 1; j <= k; j++)
+    dp[i][j] = a[i-1] === b[j-1] ? dp[i-1][j-1] : 1 + Math.min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1]);
+  return dp[m][k] <= 2;
+}
+
+// ── Timer autonome — tourne toujours, ne dépend pas des snapshots
+function _startTimer(state) {
+  stopTimer();
+  const arcEl = document.getElementById('timer-arc');
+  const timerEl = document.getElementById('game-timer');
+  const wrap = document.querySelector('.game-timer-wrap');
+  if (!arcEl || !timerEl) {
+    console.error('[TIMER] Elements not found', { arcEl, timerEl });
+    return;
+  }
+
+  arcEl.style.strokeDasharray = CIRC;
+  const totalSecs = state.timerSeconds;
+  const alreadyElapsedMs = state.questionStartedAt ? (Date.now() - state.questionStartedAt) : 0;
+  let remaining = Math.max(0, totalSecs - Math.floor(alreadyElapsedMs / 1000));
+
+  console.log('[TIMER] Starting', { totalSecs, alreadyElapsedMs, remaining, questionIndex: state.questionIndex });
+
+  const tick = () => {
+    if (L.isPaused) {
+      console.log('[TIMER] Paused, waiting...');
+      L.timerInterval = setTimeout(tick, 200);
+      return;
+    }
+
+    console.log('[TIMER] tick remaining=', remaining);
+
+    const pct = remaining / totalSecs;
+    arcEl.style.strokeDashoffset = CIRC * (1 - pct);
+    timerEl.textContent = remaining;
+
+    if (remaining <= 10) {
+      arcEl.setAttribute('class', 'timer-arc danger');
+      timerEl.style.color = '#ff4d6d';
+      wrap?.classList.add('danger');
+    } else if (pct <= 0.5) {
+      arcEl.setAttribute('class', 'timer-arc warning');
+      timerEl.style.color = '';
+      wrap?.classList.remove('danger');
+    } else {
+      arcEl.setAttribute('class', 'timer-arc');
+      timerEl.style.color = '';
+      wrap?.classList.remove('danger');
+    }
+
+    if (remaining <= 0) {
+      console.log('[TIMER] Reached 0, stopping');
+      arcEl.style.strokeDashoffset = CIRC;
+      timerEl.textContent = '0';
+      timerEl.style.color = '';
+      wrap?.classList.remove('danger');
+      return;
+    }
+
+    remaining--;
+    L.timerInterval = setTimeout(tick, 1000);
+  };
+
+  tick();
+}
 
 window.Game = Game;
