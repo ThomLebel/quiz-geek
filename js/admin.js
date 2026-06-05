@@ -1,7 +1,7 @@
 // ═══════════════════════════════════════════
 // ADMIN MODULE v3 — Pause, team score dynamique, meilleurs contrôles
 // ═══════════════════════════════════════════
-import { db } from './firebase-config.js?v=8';
+import { db } from './firebase-config.js?v=11';
 import {
   doc, setDoc, updateDoc, deleteDoc, getDoc, getDocs,
   collection, query, orderBy, addDoc, onSnapshot,
@@ -97,6 +97,7 @@ export const Admin = {
         </div>
       </div>
       <button class="btn btn-primary full mt" onclick="Admin.createGame()">🎮 Créer et ouvrir la salle d'attente</button>
+      <button class="btn btn-ghost full mt-8" onclick="Admin.resetHistory()" style="font-size:12px;height:36px">🔄 Réinitialiser l'historique des questions</button>
     `;
 
     document.getElementById('admin-content').querySelectorAll('.btn-group').forEach(group => {
@@ -116,13 +117,28 @@ export const Admin = {
     const diff = document.querySelector('#setup-diff .btn-toggle.active')?.dataset.val || 'all';
     const timerSeconds = parseInt(document.querySelector('#setup-timer .btn-toggle.active')?.dataset.val || '20');
 
+    // Charger les IDs des questions déjà posées
+    let usedIds = [];
+    try {
+      const histSnap = await getDoc(doc(db, 'game', 'history'));
+      if (histSnap.exists()) usedIds = histSnap.data().usedIds || [];
+    } catch(e) { /* ignore */ }
+
     let pool = [...window.QUESTIONS];
     if (theme !== 'all') pool = pool.filter(q => q.theme === theme);
     if (diff !== 'all') pool = pool.filter(q => q.difficulty === diff);
+
+    // Exclure les questions déjà posées
+    const freshPool = pool.filter(q => !usedIds.includes(q.id));
+
+    // Si plus assez de questions fraîches, on repart du pool complet (reset silencieux)
+    const effectivePool = freshPool.length > 0 ? freshPool : pool;
+    if (freshPool.length === 0) window.App.toast('Toutes les questions ont été posées — réinitialisation !');
+
     const order = {debutant:1, connaisseur:2, otaku:3};
-    pool.sort((a,b) => order[a.difficulty] - order[b.difficulty] || Math.random() - 0.5);
-    const count = countRaw === 0 ? pool.length : Math.min(countRaw, pool.length);
-    const questions = pool.slice(0, count).map(q => {
+    effectivePool.sort((a,b) => order[a.difficulty] - order[b.difficulty] || Math.random() - 0.5);
+    const count = countRaw === 0 ? effectivePool.length : Math.min(countRaw, effectivePool.length);
+    const questions = effectivePool.slice(0, count).map(q => {
       const shuffled = q.answers.map((text,idx) => ({text, originalIdx:idx}));
       for (let i=shuffled.length-1;i>0;i--) {
         const j=Math.floor(Math.random()*(i+1));
@@ -138,35 +154,47 @@ export const Admin = {
       questionCount: questions.length, questions,
       questionIndex: -1, currentQuestion: null,
       answers: {}, readyPlayers: {}, finalScores: {},
-      paused: false, createdAt: Date.now()
+      paused: false, createdAt: Date.now(),
+      usedIdsSnapshot: usedIds  // snapshot pour savoir quoi ajouter à la fin
     });
-    window.App.toast('Salle créée !');
+    window.App.toast(`Salle créée ! (${questions.length} questions fraîches)`);
     Admin.renderGameSetup();
   },
 
   renderGameControl(state) {
     const content = document.getElementById('admin-content');
-    const { status, questionIndex: qIdx, questionCount: total, mode, timerSeconds } = state;
+    const { status, questionIndex: qIdx, questionCount: total, mode } = state;
     const isWaiting = status === 'waiting';
     const isQuestion = status === 'question';
     const isReveal = status === 'reveal';
     const isPaused = status === 'paused';
-    const readyCount = Object.keys(state.readyPlayers || {}).length;
-    const answerCount = Object.keys(state.answers || {}).length;
+    const readyPlayers = Object.entries(state.readyPlayers || {}).filter(([,p]) => p !== null);
+    const readyCount = readyPlayers.length;
+    const answers = state.answers || {};
+    const answerCount = Object.keys(answers).length;
+    const q = state.currentQuestion;
 
-    const readyChips = Object.values(state.readyPlayers || {}).filter(Boolean)
-      .map(p => {
-        const pseudo = typeof p === 'object' ? p.pseudo : p;
-        const av = (window.AVATARS || []).find(a => a.id === (typeof p === 'object' ? p.avatarId : null));
-        return `<div class="ready-chip ready">${av ? `<div style="width:24px;height:24px;border-radius:50%;overflow:hidden;display:inline-block;vertical-align:middle;margin-right:6px">${av.svg}</div>` : '👤'} ${pseudo}</div>`;
-      }).join('');
+    const readyChips = readyPlayers.map(([,p]) => {
+      const pseudo = typeof p === 'object' ? p.pseudo : p;
+      const av = (window.AVATARS || []).find(a => a.id === (typeof p === 'object' ? p.avatarId : null));
+      return `<div class="ready-chip ready">${av ? `<div style="width:24px;height:24px;border-radius:50%;overflow:hidden;display:inline-block;vertical-align:middle;margin-right:6px">${av.svg}</div>` : '👤'} ${pseudo}</div>`;
+    }).join('');
 
-    const answerRows = Object.entries(state.answers || {})
-      .map(([,a]) => `<div class="live-answer-row">${a.isCorrect?'✅':'❌'} <span>${a.pseudo}</span></div>`)
-      .join('');
+    // Réponses détaillées avec le choix exact de chaque joueur
+    const answerRows = readyPlayers.map(([uid, p]) => {
+      const pseudo = typeof p === 'object' ? p.pseudo : p;
+      const a = answers[uid];
+      if (!a) return `<div class="live-answer-row"><span style="color:var(--text3)">⏳</span> <span style="color:var(--text2)">${pseudo}</span></div>`;
+      const chosenText = q?.shuffledAnswers?.find(s => s.originalIdx === a.originalIdx)?.text || '?';
+      return `<div class="live-answer-row">
+        ${a.isCorrect ? '✅' : '❌'}
+        <span style="flex:1">${pseudo}</span>
+        <span style="font-size:12px;color:${a.isCorrect ? 'var(--success)' : 'var(--error)'};max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${chosenText}</span>
+      </div>`;
+    }).join('');
 
     let statusLabel = isWaiting ? '⏳ Salle d\'attente'
-      : isPaused ? `⏸ PAUSE — Question ${qIdx+1}/${total}`
+      : isPaused ? `⏸ PAUSE — Q${qIdx+1}/${total}`
       : isQuestion ? `❓ Question ${qIdx+1}/${total}`
       : isReveal ? `✅ Correction ${qIdx+1}/${total}`
       : '🏁 Partie terminée';
@@ -174,25 +202,45 @@ export const Admin = {
     content.innerHTML = `
       <div class="admin-section-title">${statusLabel}</div>
 
+      ${(isQuestion || isPaused || isReveal) && q ? `
+        <div class="game-setup-card" style="border-left:3px solid var(--accent)">
+          <div class="game-setup-label">Question en cours <span class="difficulty-badge ${q.difficulty}" style="margin-left:8px">${window.DIFFICULTY_LABELS?.[q.difficulty]||q.difficulty}</span></div>
+          <div style="font-size:14px;font-weight:700;color:var(--text);line-height:1.4;margin-bottom:8px">${q.question}</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+            ${(q.shuffledAnswers||[]).map((ans,i) => {
+              const letters = ['A','B','C','D'];
+              const isCorrect = ans.originalIdx === q.correct;
+              return `<div style="padding:6px 10px;border-radius:8px;font-size:12px;font-weight:700;background:${isCorrect?'rgba(0,212,170,0.15)':'var(--card2)'};border:1px solid ${isCorrect?'var(--success)':'var(--border)'};color:${isCorrect?'var(--success)':'var(--text2)'}">
+                <span style="margin-right:6px;opacity:.6">${letters[i]}</span>${ans.text}
+              </div>`;
+            }).join('')}
+          </div>
+        </div>
+      ` : ''}
+
       <div class="game-setup-card">
-        <div class="game-setup-label">Joueurs dans la salle (${readyCount})</div>
+        <div class="game-setup-label">Joueurs (${readyCount})</div>
         <div class="players-ready-list">${readyChips||'<span style="color:var(--text3);font-size:13px">En attente…</span>'}</div>
       </div>
 
-      ${(isQuestion||isPaused) ? `
+      ${(isQuestion || isPaused) ? `
         <div class="game-setup-card">
-          <div class="game-setup-label">Réponses reçues</div>
-          <div class="live-count">${answerCount}<span style="font-size:20px;color:var(--text2)"> / ${readyCount}</span></div>
+          <div class="game-setup-label">Réponses <span style="font-family:\'Bangers\',cursive;font-size:22px;color:var(--accent);margin-left:8px">${answerCount}/${readyCount}</span></div>
+          <div class="live-answers">${answerRows}</div>
+        </div>
+      ` : ''}
+
+      ${isReveal && q ? `
+        <div class="game-setup-card">
+          <div class="game-setup-label">Résultats</div>
           <div class="live-answers">${answerRows}</div>
         </div>
       ` : ''}
 
       <div class="admin-controls-row">
-        ${isWaiting ? `
-          <button class="btn btn-primary" onclick="Admin.launchGame()">🚀 Lancer la partie</button>
-        ` : ''}
+        ${isWaiting ? `<button class="btn btn-primary" onclick="Admin.launchGame()">🚀 Lancer la partie</button>` : ''}
         ${(isQuestion||isPaused) ? `
-          <button class="btn btn-primary" onclick="Admin.nextQuestion()">⏭ Passer à la correction</button>
+          <button class="btn btn-primary" onclick="Admin.nextQuestion()">⏭ Correction</button>
           ${isPaused
             ? `<button class="btn btn-success" onclick="Admin.resumeGame()">▶ Reprendre</button>`
             : `<button class="btn btn-warn" onclick="Admin.pauseGame()">⏸ Pause</button>`
@@ -200,12 +248,12 @@ export const Admin = {
         ` : ''}
         ${isReveal ? `
           <button class="btn btn-primary" onclick="Admin.launchNext()">
-            ${qIdx+1 < total ? `➡ Question suivante (${qIdx+2}/${total})` : '🏁 Terminer'}
+            ${qIdx+1 < total ? `➡ Q${qIdx+2}/${total}` : '🏁 Terminer'}
           </button>
         ` : ''}
       </div>
 
-      <button class="btn btn-danger full" onclick="Admin.stopGame()">⏹ Arrêter et fermer la partie</button>
+      <button class="btn btn-danger full" onclick="Admin.stopGame()">⏹ Arrêter la partie</button>
     `;
   },
 
@@ -290,10 +338,19 @@ export const Admin = {
 
   async finishGame(state) {
     if (adminNextTimer) clearTimeout(adminNextTimer);
-    // Build final scores: sum player scores for those in the game
+    // Mettre à jour l'historique des questions posées
+    try {
+      const newlyUsedIds = (state.questions || []).map(q => q.id);
+      const previousIds = state.usedIdsSnapshot || [];
+      // Fusionner sans doublons
+      const allUsedIds = [...new Set([...previousIds, ...newlyUsedIds])];
+      await setDoc(doc(db, 'game', 'history'), { usedIds: allUsedIds, updatedAt: Date.now() });
+    } catch(e) { console.error('History save error:', e); }
+
+    // Build final scores
     const pSnap = await getDocs(collection(db,'players'));
     const readyPseudos = Object.values(state.readyPlayers || {})
-      .map(p => typeof p === 'object' ? p.pseudo : p);
+      .filter(Boolean).map(p => typeof p === 'object' ? p.pseudo : p);
     const finalScores = {};
     pSnap.docs.forEach(d => {
       if (readyPseudos.includes(d.data().pseudo)) {
@@ -314,8 +371,10 @@ export const Admin = {
     Admin.renderGameSetup();
   },
 
-  // ──────────────────────────────────────────
-  // PLAYERS TAB
+  async resetHistory() {
+    await setDoc(doc(db, 'game', 'history'), { usedIds: [], updatedAt: Date.now() });
+    window.App.toast('Historique réinitialisé — toutes les questions sont disponibles.');
+  },
   // ──────────────────────────────────────────
   async renderPlayers() {
     try {
