@@ -1,50 +1,45 @@
 // ═══════════════════════════════════════════
-// APP MODULE v2
+// APP v4 — Orchestration principale
 // ═══════════════════════════════════════════
-import { Auth } from './auth.js?v=10';
-import { Game } from './game.js?v=10';
-import { Leaderboard } from './leaderboard.js?v=10';
-import { Admin } from './admin.js?v=10';
-import { AVATARS } from './avatars.js?v=10';
-import { db } from './firebase-config.js?v=10';
-import { collection, getDocs, query, orderBy } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { Room } from './room.js?v=1';
+import { Game } from './game.js?v=1';
+import { Leaderboard } from './leaderboard.js?v=1';
+import { AVATARS } from './avatars.js?v=1';
+import { QUESTIONS, DIFFICULTY_POINTS, DIFFICULTY_LABELS } from './data.js?v=1';
 
-window.Modal = {
-  show(title, bodyHTML, buttons = []) {
-    document.getElementById('modal-title').textContent = title;
-    document.getElementById('modal-body').innerHTML = bodyHTML;
-    document.getElementById('modal-footer').innerHTML = buttons.map(b =>
-      `<button class="${b.class}" onclick="${b.onclick}" style="flex:1">${b.label}</button>`
-    ).join('');
-    document.getElementById('modal-overlay').classList.remove('hidden');
-  },
-  close() { document.getElementById('modal-overlay').classList.add('hidden'); }
-};
+// Globals accessibles depuis le HTML
+window.AVATARS = AVATARS;
+window.QUESTIONS = QUESTIONS;
+window.DIFFICULTY_POINTS = DIFFICULTY_POINTS;
+window.DIFFICULTY_LABELS = DIFFICULTY_LABELS;
 
-let _toastTimeout;
-window.App = {
-  toast(msg, duration = 2500) {
-    const el = document.getElementById('toast');
-    el.textContent = msg;
-    el.classList.remove('hidden');
-    clearTimeout(_toastTimeout);
-    _toastTimeout = setTimeout(() => el.classList.add('hidden'), duration);
-  },
+export const App = {
+  _prevScreen: null,
 
   showScreen(name) {
     document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-    document.getElementById(`screen-${name}`)?.classList.add('active');
+    const next = document.getElementById(`screen-${name}`);
+    if (next) next.classList.add('active');
+    App._prevScreen = name;
   },
 
-  goToLogin() {
-    App.showScreen('login');
-    App.renderAvatarGrid('new');
-    Auth.showTab('new');
-    App.loadTeamsForSelect();
+  goToCreate() {
+    App.showScreen('create');
+    App.renderAvatarGrid('create');
   },
 
-  goToAdminLogin() {
-    App.showScreen('admin-login');
+  goToJoin() {
+    App.showScreen('join');
+    App.renderAvatarGrid('join');
+    // Masquer le champ mot de passe par défaut
+    document.getElementById('join-password-row')?.classList.add('hidden');
+    // Charger la liste des salons
+    Room.loadRoomList();
+  },
+
+  backFromLeaderboard() {
+    const active = document.querySelector('.screen.active')?.id;
+    App.showScreen('game-end');
   },
 
   renderAvatarGrid(suffix) {
@@ -57,60 +52,63 @@ window.App = {
         <div class="avatar-name">${av.name}</div>
       </div>
     `).join('');
+    // Sélection par défaut : premier avatar
     grid.querySelector('.avatar-item-wrap')?.classList.add('selected');
   },
 
   selectAvatar(id, el, suffix) {
-    document.querySelectorAll(`#avatar-grid-${suffix} .avatar-item-wrap`).forEach(i => i.classList.remove('selected'));
+    document.querySelectorAll(`#avatar-grid-${suffix} .avatar-item-wrap`)
+      .forEach(i => i.classList.remove('selected'));
     el.classList.add('selected');
   },
 
-  async loadTeamsForSelect() {
-    try {
-      const snap = await getDocs(query(collection(db, 'teams'), orderBy('name')));
-      const sel = document.getElementById('new-team-select');
-      if (!sel) return;
-      sel.innerHTML = '<option value="">— Sans équipe —</option>';
-      snap.docs.forEach(d => {
-        sel.innerHTML += `<option value="${d.id}">${d.data().name}</option>`;
-      });
-    } catch (e) { /* ignore */ }
-  },
-
-  updateLobbyUI() {
-    const u = window.currentUser;
-    if (!u) return;
-    const av = AVATARS.find(a => a.id === u.avatarId);
-    document.getElementById('lobby-avatar').innerHTML = av ? av.svg : '';
-    document.getElementById('lobby-pseudo').textContent = u.pseudo;
-    document.getElementById('lobby-score').textContent = u.score || 0;
-    document.getElementById('lobby-team-name').textContent = u.teamName || 'Sans équipe';
-  },
-
-  showLeaderboard() {
-    App.showScreen('leaderboard');
-    Leaderboard.show('players');
-  },
-
-  backToLobby() {
-    const u = window.currentUser;
-    if (!u) { App.showScreen('home'); return; }
-    if (u.isAdmin) {
-      App.showScreen('admin');
-      Admin.init();
-    } else {
-      App.updateLobbyUI();
-      App.showScreen('player-lobby');
-    }
+  toast(msg, duration = 2800) {
+    const el = document.getElementById('toast');
+    if (!el) return;
+    el.textContent = msg;
+    el.classList.remove('hidden');
+    clearTimeout(App._toastTimer);
+    App._toastTimer = setTimeout(() => el.classList.add('hidden'), duration);
   }
 };
 
+// ══════════════════════════════════════════════════════
+// MODAL
+// ══════════════════════════════════════════════════════
+window.Modal = {
+  show(title, body, buttons = []) {
+    document.getElementById('modal-title').innerHTML = title;
+    document.getElementById('modal-body').innerHTML = body;
+    document.getElementById('modal-footer').innerHTML = buttons.map(b =>
+      `<button class="${b.class}" onclick="${b.onclick}">${b.label}</button>`
+    ).join('');
+    document.getElementById('modal-overlay').classList.remove('hidden');
+  },
+  close() {
+    document.getElementById('modal-overlay').classList.add('hidden');
+  }
+};
+
+// ══════════════════════════════════════════════════════
+// INIT
+// ══════════════════════════════════════════════════════
+window.App = App;
+window.Room = Room;
+window.Game = Game;
+window.Leaderboard = Leaderboard;
+
 async function init() {
-  App.showScreen('loading');
-  await new Promise(r => setTimeout(r, 1800));
-  const restored = await Auth.restoreSession();
-  if (!restored) App.showScreen('home');
-  Auth.init();
+  // Essayer de restaurer la session
+  const restored = await Room.restoreSession();
+  if (!restored) {
+    // Démarrer au home avec animation
+    setTimeout(() => App.showScreen('home'), 1800);
+  }
+
+  // Démarrer l'écoute de jeu si session active
+  if (window.session.roomCode) {
+    Game.startListening();
+  }
 }
 
 init();

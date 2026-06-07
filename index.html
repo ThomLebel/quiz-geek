@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no"/>
-  <title>Le Guide du Geek — Quiz EVG</title>
+  <title>Le Guide du Geek — Quiz</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Bangers&family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/style.css"/>
@@ -15,7 +15,7 @@
   <div class="loading-inner">
     <div class="loading-logo">🎮</div>
     <div class="loading-title">LE GUIDE DU GEEK</div>
-    <div class="loading-sub">Quiz EVG Edition Ultime</div>
+    <div class="loading-sub">Quiz multijoueur</div>
     <div class="loading-bar"><div class="loading-fill"></div></div>
   </div>
 </div>
@@ -24,148 +24,186 @@
 <div id="screen-home" class="screen">
   <div class="home-bg-grid"></div>
   <div class="home-content">
-    <div class="home-badge">EVG 2026</div>
     <h1 class="home-title">LE GUIDE<br>DU GEEK</h1>
-    <p class="home-sub">105 Questions • Mangas • Jeux Vidéo • Séries</p>
+    <p class="home-sub">105 Questions · Mangas · Jeux Vidéo · Séries</p>
     <div class="home-buttons">
-      <button class="btn btn-primary full" onclick="App.goToLogin()">🎮 Rejoindre la partie</button>
-      <button class="btn btn-ghost full" onclick="App.goToAdminLogin()">🔐 Admin</button>
-    </div>
-    <div class="home-leaderboard-btn" onclick="App.showLeaderboard()">🏆 Voir le classement</div>
-  </div>
-</div>
-
-<!-- LOGIN -->
-<div id="screen-login" class="screen">
-  <div class="screen-header">
-    <button class="back-btn" onclick="App.showScreen('home')">← Retour</button>
-    <h2>Mon profil</h2>
-    <div style="width:70px"></div>
-  </div>
-  <div class="login-tabs">
-    <button class="tab active" id="tab-new" onclick="Auth.showTab('new')">Nouveau joueur</button>
-    <button class="tab" id="tab-existing" onclick="Auth.showTab('existing')">J'ai déjà un profil</button>
-  </div>
-
-  <!-- Nouveau joueur -->
-  <div id="login-new" class="login-form">
-    <div class="form-group">
-      <label>Ton pseudo</label>
-      <input type="text" id="new-pseudo" placeholder="ex: NarutoFan42" maxlength="20" autocomplete="off"/>
-    </div>
-    <div class="form-group">
-      <label>Mot de passe (min. 4 car.)</label>
-      <input type="password" id="new-password" placeholder="Pour te reconnecter"/>
-    </div>
-    <div class="form-group">
-      <label>Rejoindre une équipe (optionnel)</label>
-      <select id="new-team-select">
-        <option value="">— Sans équipe —</option>
-      </select>
-    </div>
-    <div class="form-group">
-      <label>Choisis ton avatar</label>
-      <div class="avatar-grid" id="avatar-grid-new"></div>
-    </div>
-    <div id="new-player-error" class="error-msg hidden"></div>
-    <button class="btn btn-primary full" onclick="Auth.registerPlayer()">🚀 C'est parti !</button>
-  </div>
-
-  <!-- Joueur existant -->
-  <div id="login-existing" class="login-form hidden">
-    <div class="existing-players-list" id="existing-players-list">
-      <div class="spinner"></div>
-    </div>
-    <div id="existing-password-form" class="hidden">
-      <div id="selected-player-card" class="selected-player-preview"></div>
-      <div class="form-group" style="margin-top:16px">
-        <label>Mot de passe</label>
-        <input type="password" id="existing-password" placeholder="Ton mot de passe"/>
-      </div>
-      <div id="existing-error" class="error-msg hidden"></div>
-      <div style="display:flex;gap:12px;margin-top:8px">
-        <button class="btn btn-ghost" style="flex:1" onclick="Auth.cancelExisting()">← Retour</button>
-        <button class="btn btn-primary" style="flex:1" onclick="Auth.loginExisting()">Se connecter</button>
-      </div>
+      <button class="btn btn-primary full" onclick="App.goToCreate()">🎮 Créer un salon</button>
+      <button class="btn btn-ghost full" onclick="App.goToJoin()">🔑 Rejoindre un salon</button>
     </div>
   </div>
 </div>
 
-<!-- ADMIN LOGIN -->
-<div id="screen-admin-login" class="screen">
+<!-- CREATE ROOM -->
+<!-- CREATE ROOM -->
+<div id="screen-create" class="screen">
   <div class="screen-header">
     <button class="back-btn" onclick="App.showScreen('home')">← Retour</button>
-    <h2>Connexion Admin</h2>
+    <h2>Créer un salon</h2>
     <div style="width:70px"></div>
   </div>
   <div class="login-form">
     <div class="form-group">
-      <label>Email</label>
-      <input type="email" id="admin-email" placeholder="admin@evg.fr" autocomplete="off"/>
+      <label>Code du salon</label>
+      <input type="text" id="create-code" placeholder="ex: NARUTO42" maxlength="20" autocomplete="off" style="text-transform:uppercase"/>
+      <small class="field-hint">Tes amis devront entrer ce code pour rejoindre</small>
     </div>
     <div class="form-group">
-      <label>Mot de passe</label>
-      <input type="password" id="admin-password" placeholder="••••••••"/>
+      <label>Mot de passe du salon (optionnel)</label>
+      <input type="password" id="create-password" placeholder="Laisser vide = salon public"/>
     </div>
-    <div id="admin-error" class="error-msg hidden"></div>
-    <button class="btn btn-primary full" onclick="Auth.loginAsAdmin()">🔐 Connexion</button>
+    <div class="form-group">
+      <label>Ton pseudo (host)</label>
+      <input type="text" id="create-pseudo" placeholder="ex: NarutoFan42" maxlength="20" autocomplete="off"/>
+    </div>
+    <div class="form-group">
+      <label>Mot de passe de ton profil (optionnel)</label>
+      <input type="password" id="create-player-pw" placeholder="Pour protéger ton profil"/>
+      <small class="field-hint">Les autres joueurs ne pourront pas utiliser ton profil sans ce mot de passe</small>
+    </div>
+    <div class="form-group">
+      <label>Ton avatar</label>
+      <div class="avatar-grid" id="avatar-grid-create"></div>
+    </div>
+    <div id="create-error" class="error-msg hidden"></div>
+    <button class="btn btn-primary full" onclick="Room.createRoom()">🚀 Créer le salon</button>
   </div>
 </div>
 
-<!-- PLAYER LOBBY -->
-<div id="screen-player-lobby" class="screen">
+<!-- JOIN ROOM -->
+<div id="screen-join" class="screen">
   <div class="screen-header">
-    <div class="player-header-info">
-      <div class="player-avatar-small" id="lobby-avatar"></div>
-      <span id="lobby-pseudo"></span>
-    </div>
-    <button class="btn-icon" onclick="Auth.logout()" title="Déconnexion">⏻</button>
+    <button class="back-btn" onclick="App.showScreen('home')">← Retour</button>
+    <h2>Rejoindre un salon</h2>
+    <button class="btn-icon" onclick="Room.loadRoomList()" title="Actualiser">🔄</button>
   </div>
-  <div class="lobby-content">
-    <div class="lobby-score-card">
-      <div class="score-big" id="lobby-score">0</div>
-      <div class="score-label">points au total</div>
-    </div>
-    <div class="lobby-team-card">
-      <div class="team-label">Mon équipe</div>
-      <div class="team-name" id="lobby-team-name">Sans équipe</div>
-    </div>
-    <div id="lobby-game-status" class="game-status-banner hidden">
-      <div class="game-status-icon">🎮</div>
-      <div class="game-status-text">
-        <div class="game-status-title" id="game-status-title">Partie disponible</div>
-        <div class="game-status-sub" id="game-status-sub"></div>
+  <div class="login-form">
+
+    <!-- Étape 1 : code du salon -->
+    <div id="join-step1">
+      <div class="form-group">
+        <label>Salons ouverts</label>
+        <div id="room-list"><div class="empty-state" style="padding:20px">Chargement…</div></div>
       </div>
-      <button class="btn btn-primary" id="game-join-btn" style="flex-shrink:0;height:44px;padding:0 16px;font-size:14px" onclick="Game.joinCurrentGame()">Rejoindre</button>
+      <div class="form-group">
+        <label>Code du salon</label>
+        <input type="text" id="join-code" placeholder="ex: NARUTO42" maxlength="20" autocomplete="off" style="text-transform:uppercase"/>
+      </div>
+      <div class="form-group hidden" id="join-password-row">
+        <label>Mot de passe du salon</label>
+        <input type="password" id="join-password" placeholder="Mot de passe du salon"/>
+      </div>
+      <div id="join-error" class="error-msg hidden"></div>
+      <button class="btn btn-primary full" onclick="Room.checkRoom()">Voir les profils →</button>
     </div>
-    <button class="btn btn-ghost full" onclick="App.showLeaderboard()">🏆 Voir le classement</button>
+
+    <!-- Étape 2 : choisir/créer un profil -->
+    <div id="join-step2" class="hidden">
+      <div class="step2-header">
+        <button class="back-btn" onclick="Room.backToStep1()">← Retour</button>
+        <span class="step2-code" id="step2-code-label"></span>
+      </div>
+
+      <div class="form-group">
+        <label>Choisir un profil</label>
+        <div id="existing-profiles-grid" class="profiles-grid"></div>
+        <div class="profile-card profile-card-new" onclick="Room.selectNewProfile()">
+          <div class="profile-avatar" style="font-size:28px;display:flex;align-items:center;justify-content:center;width:52px;height:52px;background:var(--card2);border-radius:50%">➕</div>
+          <div class="profile-name">Nouveau joueur</div>
+        </div>
+      </div>
+
+      <!-- Rejoindre profil existant -->
+      <div id="existing-profile-section" class="hidden">
+        <div class="form-group" id="existing-profile-pw-row">
+          <label>Mot de passe du profil</label>
+          <input type="password" id="existing-profile-pw" placeholder="Mot de passe du profil"/>
+        </div>
+        <div id="join-error2" class="error-msg hidden"></div>
+        <button class="btn btn-primary full" onclick="Room.joinRoom()">🎮 Rejoindre avec ce profil</button>
+      </div>
+
+      <!-- Créer nouveau profil -->
+      <div id="new-profile-section" class="hidden">
+        <div class="form-group">
+          <label>Ton pseudo</label>
+          <input type="text" id="join-new-pseudo" placeholder="ex: NarutoFan42" maxlength="20" autocomplete="off"/>
+        </div>
+        <div class="form-group">
+          <label>Mot de passe de ton profil (optionnel)</label>
+          <input type="password" id="join-new-pw" placeholder="Pour protéger ton profil"/>
+        </div>
+        <div class="form-group">
+          <label>Ton avatar</label>
+          <div class="avatar-grid" id="avatar-grid-join2"></div>
+        </div>
+        <div id="join-error2b" class="error-msg hidden"></div>
+        <button class="btn btn-primary full" onclick="Room.joinRoom()">🎮 Rejoindre</button>
+      </div>
+    </div>
+
   </div>
 </div>
 
-<!-- GAME WAITING -->
-<div id="screen-game-waiting" class="screen">
-  <div class="waiting-content">
-    <div class="waiting-icon">⏳</div>
-    <h2 class="waiting-title">Prêt !</h2>
-    <p class="waiting-sub">En attente du lancement par l'admin…</p>
-    <div class="waiting-info" id="waiting-info"></div>
-    <div class="waiting-players" id="waiting-players"></div>
-    <button class="btn btn-ghost mt" onclick="Game.leaveGame()">← Quitter la salle</button>
+
+<!-- LOBBY (waiting room — everyone sees this) -->
+<div id="screen-lobby" class="screen">
+  <div class="screen-header">
+    <div class="room-code-badge" id="lobby-code-badge">CODE: ????</div>
+    <h2 id="lobby-title">Salon</h2>
+    <button class="btn-icon" onclick="Room.leaveRoom()" title="Quitter">⏻</button>
+  </div>
+
+  <!-- HOST CONTROLS (only visible to host) -->
+  <div id="host-controls" class="hidden">
+    <div class="host-panel">
+      <div class="host-panel-title">⚙️ Configuration de la partie</div>
+
+      <!-- Manches dynamiques -->
+      <div id="rounds-container"></div>
+      <button class="add-btn" onclick="Room.addRound()">+ Ajouter une manche</button>
+
+      <button class="btn btn-primary full mt" onclick="Game.hostStartGame()">🚀 Lancer la partie !</button>
+    </div>
+  </div>
+
+  <!-- PLAYER VIEW (non-host) -->
+  <div id="player-waiting" class="hidden">
+    <div class="waiting-content">
+      <div class="waiting-icon">⏳</div>
+      <div class="waiting-title">En attente…</div>
+      <div class="waiting-sub" id="waiting-sub">Le host configure la partie</div>
+      <button id="rejoin-game-btn" class="btn btn-primary mt hidden" onclick="Game.rejoinGame()">
+        🎮 Retourner dans la partie
+      </button>
+    </div>
+  </div>
+
+  <!-- Teams section — visible for ALL players -->
+  <div class="lobby-players-section" id="teams-section">
+    <div class="lobby-section-label">👥 Équipes</div>
+    <div id="teams-list"></div>
+    <!-- Bouton créer équipe — visible seulement pour le host via JS -->
+    <button class="add-btn hidden" id="btn-add-team" onclick="Room.addTeam()">+ Créer une équipe</button>
+  </div>
+
+  <!-- Players in room (everyone sees) -->
+  <div class="lobby-players-section">
+    <div class="lobby-section-label">Joueurs dans le salon (<span id="player-count">0</span>)</div>
+    <div class="lobby-players-grid" id="lobby-players-grid"></div>
   </div>
 </div>
 
-<!-- GAME -->
+<!-- GAME SCREEN -->
 <div id="screen-game" class="screen">
-  <!-- Pause overlay -->
   <div class="pause-overlay hidden" id="pause-overlay">
     <div class="pause-title">⏸ PAUSE</div>
-    <div class="pause-sub">L'admin reprendra bientôt…</div>
+    <div class="pause-sub">Le host reprendra bientôt…</div>
+    <!-- Bouton reprendre visible uniquement pour le host -->
+    <button id="pause-resume-btn" class="btn btn-success mt hidden" onclick="Game.hostPause()">▶ Reprendre la partie</button>
   </div>
 
   <div class="game-header">
-    <div class="game-progress">
-      <span id="game-q-num">1</span>/<span id="game-q-total">10</span>
-    </div>
+    <div class="game-progress"><span id="game-q-num">1</span>/<span id="game-q-total">10</span></div>
     <div class="game-timer-wrap">
       <svg class="timer-ring" viewBox="0 0 48 48">
         <circle class="timer-bg" cx="24" cy="24" r="22"/>
@@ -176,20 +214,27 @@
     <div class="game-score-display"><span id="game-current-score">0</span> pts</div>
   </div>
 
+  <!-- HOST GAME CONTROLS (mini bar) -->
+  <div id="host-game-bar" class="hidden">
+    <div class="host-game-controls">
+      <span id="host-answer-count" class="host-answer-badge">0/0 réponses</span>
+      <button class="btn-sm btn-warn" onclick="Game.hostPause()" id="btn-pause">⏸</button>
+      <button class="btn-sm btn-primary" onclick="Game.hostForceReveal()">⏭ Corriger</button>
+    </div>
+  </div>
+
   <div class="game-body">
     <div class="difficulty-badge" id="game-difficulty-badge">Débutant</div>
     <div class="game-question" id="game-question">…</div>
 
-    <!-- Mode aveugle -->
+    <!-- Blind mode -->
     <div class="blind-zone hidden" id="blind-zone">
       <div class="blind-attempts" id="blind-attempts"></div>
       <div class="blind-input-row" id="blind-input-row">
         <input type="text" id="blind-answer" placeholder="Ta réponse…" autocomplete="off"/>
         <button class="btn btn-primary" onclick="Game.submitBlindAnswer()">✓</button>
       </div>
-      <button class="blind-reveal-btn" id="blind-reveal-btn" onclick="Game.revealChoices()">
-        👁 Voir les propositions
-      </button>
+      <button class="blind-reveal-btn" id="blind-reveal-btn" onclick="Game.revealChoices()">👁 Voir les propositions</button>
     </div>
 
     <div class="answers-grid" id="answers-grid"></div>
@@ -202,19 +247,16 @@
     </div>
   </div>
 
-  <!-- Speed podium -->
   <div class="speed-live-bar hidden" id="speed-live-bar">
-    <div class="speed-live-title">Premiers à répondre correctement</div>
+    <div class="speed-live-title">Premiers à répondre</div>
     <div id="speed-live-list"></div>
   </div>
 
-  <!-- Leave button -->
   <button class="game-leave-btn" onclick="Game.requestLeave()">Quitter ✕</button>
 </div>
 
-<!-- GAME REVEAL — 3 phases -->
+<!-- REVEAL SCREEN -->
 <div id="screen-game-reveal" class="screen">
-  <!-- Phase 1 : résultats de la question -->
   <div id="reveal-phase1">
     <div class="reveal-header">
       <div class="reveal-answer-label">Bonne réponse</div>
@@ -225,20 +267,22 @@
       <span class="reveal-my-icon" id="reveal-my-result-icon"></span>
       <span class="reveal-my-text" id="reveal-my-result-text"></span>
     </div>
+    <!-- HOST: détail des réponses -->
+    <div id="reveal-host-answers" class="hidden"></div>
     <div class="reveal-players-list" id="reveal-players-list"></div>
   </div>
-
-  <!-- Phase 2 : classement animé -->
   <div id="reveal-phase2" class="hidden">
     <div class="reveal-lb-title">🏆 Classement</div>
     <div class="reveal-leaderboard" id="reveal-leaderboard"></div>
   </div>
-
-  <!-- Phase 3 : décompte -->
   <div id="reveal-phase3" class="hidden">
     <div class="reveal-next-label" id="reveal-next-label"></div>
     <div class="reveal-countdown" id="reveal-countdown">3</div>
     <div class="reveal-countdown-sub">secondes…</div>
+  </div>
+  <!-- HOST controls during reveal -->
+  <div id="reveal-host-controls" class="hidden" style="position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:50">
+    <button class="btn btn-primary" onclick="Game.hostAdvance()" id="btn-host-advance">➡ Continuer</button>
   </div>
 </div>
 
@@ -249,13 +293,13 @@
     <h2 class="end-title">Partie terminée !</h2>
     <div class="end-score-card">
       <div class="end-score" id="end-score">0</div>
-      <div class="end-score-label">points gagnés cette partie</div>
+      <div class="end-score-label">points gagnés</div>
     </div>
     <div class="end-stats" id="end-stats"></div>
     <div class="end-podium" id="end-podium"></div>
     <div class="end-buttons">
-      <button class="btn btn-primary" onclick="App.showLeaderboard()">🏆 Classement</button>
-      <button class="btn btn-ghost" onclick="App.backToLobby()">🏠 Accueil</button>
+      <button class="btn btn-primary" onclick="Game.showFinalLeaderboard()">🏆 Classement final</button>
+      <button class="btn btn-ghost" onclick="Room.backToLobby()" id="btn-back-lobby">🏠 Retour au salon</button>
     </div>
   </div>
 </div>
@@ -263,8 +307,8 @@
 <!-- LEADERBOARD -->
 <div id="screen-leaderboard" class="screen">
   <div class="screen-header">
-    <button class="back-btn" onclick="App.backToLobby()">← Retour</button>
-    <h2>🏆 Classements</h2>
+    <button class="back-btn" onclick="App.backFromLeaderboard()">← Retour</button>
+    <h2>🏆 Classement</h2>
     <div style="width:70px"></div>
   </div>
   <div class="leaderboard-tabs">
@@ -272,22 +316,6 @@
     <button class="tab" onclick="Leaderboard.show('teams')" id="tab-lb-teams">Équipes</button>
   </div>
   <div class="leaderboard-list" id="leaderboard-list"></div>
-</div>
-
-<!-- ADMIN PANEL -->
-<div id="screen-admin" class="screen">
-  <div class="screen-header">
-    <button class="back-btn" onclick="Auth.logout()">⏻ Déco</button>
-    <h2>🛠 Admin</h2>
-    <div style="width:70px"></div>
-  </div>
-  <div class="admin-tabs">
-    <button class="tab active" onclick="Admin.showTab('game')" id="atab-game">Partie</button>
-    <button class="tab" onclick="Admin.showTab('players')" id="atab-players">Joueurs</button>
-    <button class="tab" onclick="Admin.showTab('teams')" id="atab-teams">Équipes</button>
-    <button class="tab" onclick="Admin.showTab('questions')" id="atab-questions">Questions</button>
-  </div>
-  <div class="admin-content" id="admin-content"></div>
 </div>
 
 <!-- MODAL -->
@@ -302,13 +330,12 @@
 <!-- TOAST -->
 <div id="toast" class="toast hidden"></div>
 
-<script type="module" src="js/firebase-config.js?v=12"></script>
-<script type="module" src="js/data.js?v=12"></script>
-<script type="module" src="js/avatars.js?v=12"></script>
-<script type="module" src="js/auth.js?v=12"></script>
-<script type="module" src="js/game.js?v=12"></script>
-<script type="module" src="js/leaderboard.js?v=12"></script>
-<script type="module" src="js/admin.js?v=12"></script>
-<script type="module" src="js/app.js?v=12"></script>
+<script type="module" src="js/firebase-config.js?v=1"></script>
+<script type="module" src="js/data.js?v=1"></script>
+<script type="module" src="js/avatars.js?v=1"></script>
+<script type="module" src="js/room.js?v=1"></script>
+<script type="module" src="js/game.js?v=1"></script>
+<script type="module" src="js/leaderboard.js?v=1"></script>
+<script type="module" src="js/app.js?v=1"></script>
 </body>
 </html>
