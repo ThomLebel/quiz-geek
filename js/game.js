@@ -68,15 +68,19 @@ export const Game = {
       if (h.exists()) usedIds = h.data().usedIds || [];
     } catch(e) {}
 
-    // Charger les questions depuis Firestore
+    // Charger les questions depuis Firestore, avec fallback sur data.js
     let allQuestions = [];
     try {
       const snap = await getDocs(collection(db, 'questions'));
       allQuestions = snap.docs.map(d => ({ ...d.data(), _firestoreId: d.id }));
-    } catch(e) {
-      // Fallback sur data.js si Firestore vide
+    } catch(e) {}
+
+    // Fallback sur les questions locales si Firestore vide ou inaccessible
+    if (!allQuestions.length) {
       allQuestions = window.QUESTIONS || [];
-      window.App.toast('⚠️ Firestore vide — utilisation des questions locales');
+      if (allQuestions.length) {
+        window.App.toast('Utilisation des questions locales (Firestore vide)');
+      }
     }
 
     if (!allQuestions.length) {
