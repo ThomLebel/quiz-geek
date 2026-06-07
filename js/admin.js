@@ -1,7 +1,7 @@
 // ═══════════════════════════════════════════
 // ADMIN MODULE v3 — Pause, team score dynamique, meilleurs contrôles
 // ═══════════════════════════════════════════
-import { db } from './firebase-config.js?v=11';
+import { db } from './firebase-config.js?v=12';
 import {
   doc, setDoc, updateDoc, deleteDoc, getDoc, getDocs,
   collection, query, orderBy, addDoc, onSnapshot,
@@ -154,10 +154,10 @@ export const Admin = {
       questionCount: questions.length, questions,
       questionIndex: -1, currentQuestion: null,
       answers: {}, readyPlayers: {}, finalScores: {},
-      paused: false, createdAt: Date.now(),
-      usedIdsSnapshot: usedIds  // snapshot pour savoir quoi ajouter à la fin
+      paused: false, createdAt: Date.now()
     });
-    window.App.toast(`Salle créée ! (${questions.length} questions fraîches)`);
+    const remaining = window.QUESTIONS.length - (usedIds.length + questions.length);
+    window.App.toast(`Salle créée ! ${questions.length} questions · ${Math.max(0, remaining)} restantes dans le pool`);
     Admin.renderGameSetup();
   },
 
@@ -275,12 +275,25 @@ export const Admin = {
     const state = snap.data();
     const q = state.questions[idx];
     const now = Date.now();
+
+    // Sauvegarder immédiatement l'ID de cette question dans l'historique global
+    // → fonctionne même si la partie est stoppée en cours de route
+    try {
+      const histSnap = await getDoc(doc(db, 'game', 'history'));
+      const existing = histSnap.exists() ? (histSnap.data().usedIds || []) : [];
+      if (!existing.includes(q.id)) {
+        await setDoc(doc(db, 'game', 'history'), {
+          usedIds: [...existing, q.id],
+          updatedAt: Date.now()
+        });
+      }
+    } catch(e) { console.error('History update error:', e); }
+
     await updateDoc(doc(db,'game','current'), {
       status: 'question', questionIndex: idx,
       currentQuestion: q, answers: {},
       questionStartedAt: now, paused: false
     });
-    // Auto reveal after timer
     adminNextTimer = setTimeout(() => Admin.nextQuestion(), state.timerSeconds * 1000);
   },
 
@@ -338,15 +351,7 @@ export const Admin = {
 
   async finishGame(state) {
     if (adminNextTimer) clearTimeout(adminNextTimer);
-    // Mettre à jour l'historique des questions posées
-    try {
-      const newlyUsedIds = (state.questions || []).map(q => q.id);
-      const previousIds = state.usedIdsSnapshot || [];
-      // Fusionner sans doublons
-      const allUsedIds = [...new Set([...previousIds, ...newlyUsedIds])];
-      await setDoc(doc(db, 'game', 'history'), { usedIds: allUsedIds, updatedAt: Date.now() });
-    } catch(e) { console.error('History save error:', e); }
-
+    // L'historique est déjà sauvegardé question par question dans launchQuestion
     // Build final scores
     const pSnap = await getDocs(collection(db,'players'));
     const readyPseudos = Object.values(state.readyPlayers || {})

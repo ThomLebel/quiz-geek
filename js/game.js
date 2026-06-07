@@ -11,9 +11,10 @@
 //   • Quand le timer arrive à 0, c'est l'ADMIN qui fait passer en 'reveal'
 //     (pas le client). Le client attend juste le prochain snapshot.
 // ═══════════════════════════════════════════
-import { db } from './firebase-config.js?v=8';
+import { db } from './firebase-config.js?v=12';
 import {
-  doc, updateDoc, getDoc, onSnapshot, increment, getDocs, collection
+  doc, updateDoc, getDoc, onSnapshot, increment, getDocs, collection,
+  serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
 const CIRC = 2 * Math.PI * 22; // r=22 → ≈138.2
@@ -225,7 +226,8 @@ export const Game = {
     await updateDoc(doc(db, 'game', 'current'), {
       [`answers.${uid}`]: {
         pseudo: window.currentUser.pseudo,
-        originalIdx, isCorrect, answeredAt: Date.now()
+        originalIdx, isCorrect,
+        answeredAt: serverTimestamp()  // timestamp serveur = équitable pour tous
       }
     }).catch(() => {});
   },
@@ -256,7 +258,8 @@ export const Game = {
         [`answers.${uid}`]: {
           pseudo: window.currentUser.pseudo,
           originalIdx: q.correct,
-          isCorrect: true, blindMode: true, answeredAt: Date.now()
+          isCorrect: true, blindMode: true,
+          answeredAt: serverTimestamp()
         }
       }).catch(() => {});
     }
@@ -295,7 +298,7 @@ export const Game = {
       else if (state.mode === 'speed') {
         const ranked = Object.entries(state.answers || {})
           .filter(([, v]) => v.isCorrect)
-          .sort((a, b) => a[1].answeredAt - b[1].answeredAt);
+          .sort((a, b) => _tsToMs(a[1].answeredAt) - _tsToMs(b[1].answeredAt));
         const r = ranked.findIndex(([id]) => id === uid);
         points = r === 0 ? 5 : r === 1 ? 4 : r === 2 ? 3 : 0;
       } else points = base;
@@ -559,13 +562,21 @@ function _highlightAnswer(state) {
 function _updateSpeedBar(state) {
   const ranked = Object.entries(state.answers || {})
     .filter(([, v]) => v.isCorrect)
-    .sort((a, b) => a[1].answeredAt - b[1].answeredAt)
-    .slice(0, 3);
+    .sort((a, b) => _tsToMs(a[1].answeredAt) - _tsToMs(b[1].answeredAt))
   const icons = ['🥇', '🥈', '🥉'];
   document.getElementById('speed-live-list').innerHTML =
     ranked.map(([, d], i) =>
       `<div class="speed-winner-row"><span class="speed-pos">${icons[i]}</span><span>${d.pseudo}</span></div>`
     ).join('') || '<div style="color:var(--text3);font-size:13px">Personne encore…</div>';
+}
+
+// Convertit un answeredAt (Timestamp Firestore ou ms number) en ms comparable
+function _tsToMs(ts) {
+  if (!ts) return Infinity;
+  if (typeof ts === 'number') return ts;
+  if (typeof ts.toMillis === 'function') return ts.toMillis(); // Firestore Timestamp
+  if (ts.seconds !== undefined) return ts.seconds * 1000 + (ts.nanoseconds || 0) / 1e6;
+  return Infinity;
 }
 
 function _calcPoints(state, q, answer) {
@@ -575,7 +586,7 @@ function _calcPoints(state, q, answer) {
   if (state.mode === 'speed') {
     const ranked = Object.entries(state.answers || {})
       .filter(([, v]) => v.isCorrect)
-      .sort((a, b) => a[1].answeredAt - b[1].answeredAt);
+      .sort((a, b) => _tsToMs(a[1].answeredAt) - _tsToMs(b[1].answeredAt));
     const r = ranked.findIndex(([, v]) => v === answer);
     return r === 0 ? 5 : r === 1 ? 4 : r === 2 ? 3 : 0;
   }
