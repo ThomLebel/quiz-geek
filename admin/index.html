@@ -70,6 +70,7 @@
   <div class="tab" data-tab="generate">🤖 Génération IA</div>
   <div class="tab" data-tab="import">📥 Import CSV</div>
   <div class="tab" data-tab="browse">🔍 Parcourir</div>
+  <div class="tab" data-tab="translate">🇬🇧 Traductions EN</div>
 </div>
 
 <!-- ═══ STATS ═══ -->
@@ -220,6 +221,27 @@
   <div id="browse-more" style="display:none;text-align:center;margin-top:16px">
     <button class="btn btn-ghost" id="btn-browse-more">Charger plus…</button>
   </div>
+</div>
+
+
+<div id="panel-translate" class="panel">
+  <h2>🇬🇧 Pousser les traductions EN vers Firestore</h2>
+  <p style="color:var(--text2);margin-bottom:16px;line-height:1.5">
+    Cet outil lit les questions dans Firestore (identifiées par <code>localId</code>) et y ajoute les champs
+    <code>question_en</code>, <code>answers_en</code> et <code>focus_en</code> depuis le fichier de traduction intégré.<br>
+    <strong>Les questions sans traduction (Q31–Q60 si manquantes, questions IA/CSV) sont ignorées.</strong>
+  </p>
+  <div class="card">
+    <div id="translate-stats" style="margin-bottom:16px;color:var(--text3)">Cliquez sur Analyser pour commencer.</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <button class="btn btn-secondary" id="btn-translate-analyze">🔍 Analyser</button>
+      <button class="btn btn-primary" id="btn-translate-push" disabled>🚀 Pousser les traductions</button>
+    </div>
+    <div class="progress-bar" style="display:none;margin-top:12px" id="translate-progress-bar">
+      <div class="progress-fill" id="translate-progress" style="width:0%"></div>
+    </div>
+  </div>
+  <div class="log" id="translate-log" style="display:none"></div>
 </div>
 
 <div id="toast"></div>

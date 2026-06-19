@@ -1,6 +1,7 @@
 // ═══════════════════════════════════════════
 // APP v4 — Orchestration principale
 // ═══════════════════════════════════════════
+import { I18n } from './i18n.js?v=1';
 import { Room } from './room.js?v=1';
 import { Game } from './game.js?v=1';
 import { Leaderboard } from './leaderboard.js?v=1';
@@ -12,6 +13,10 @@ window.AVATARS = AVATARS;
 window.QUESTIONS = QUESTIONS;
 window.DIFFICULTY_POINTS = DIFFICULTY_POINTS;
 window.DIFFICULTY_LABELS = DIFFICULTY_LABELS;
+window.I18n = I18n;
+
+// Init i18n immediately (before screens show)
+I18n.init();
 
 export const App = {
   _prevScreen: null,

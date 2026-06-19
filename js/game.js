@@ -59,7 +59,7 @@ export const Game = {
     const { roomCode } = window.session;
     const rounds = window.Room._rounds || [{ mode:'normal', count:10, theme:'all', difficulty:'all', timer:20 }];
 
-    window.App.toast('Préparation de la partie…');
+    window.App.toast(window.I18n.t('toast_preparing'));
 
     // Charger l'historique des questions déjà posées
     let usedIds = [];
@@ -79,12 +79,12 @@ export const Game = {
     if (!allQuestions.length) {
       allQuestions = window.QUESTIONS || [];
       if (allQuestions.length) {
-        window.App.toast('Utilisation des questions locales (Firestore vide)');
+        window.App.toast(window.I18n.t('toast_local_questions'));
       }
     }
 
     if (!allQuestions.length) {
-      window.App.toast('Aucune question disponible !'); return;
+      window.App.toast(window.I18n.t('toast_no_questions')); return;
     }
 
     // Construire les questions pour chaque manche
@@ -94,7 +94,7 @@ export const Game = {
       if (r.difficulty !== 'all') pool = pool.filter(q => q.difficulty === r.difficulty);
       const fresh = pool.filter(q => !usedIds.includes(q.id) && !usedIds.includes(q._firestoreId));
       const effective = fresh.length > 0 ? fresh : pool;
-      if (fresh.length === 0 && pool.length > 0) window.App.toast('Pool réinitialisé pour ce thème !');
+      if (fresh.length === 0 && pool.length > 0) window.App.toast(window.I18n.t('toast_pool_reset'));
 
       const orderMap = { debutant:1, connaisseur:2, otaku:3 };
       effective.sort((a,b) => (orderMap[a.difficulty]-orderMap[b.difficulty]) || (Math.random()-.5));
@@ -110,7 +110,7 @@ export const Game = {
     });
 
     if (builtRounds.every(r => r.questions.length === 0)) {
-      window.App.toast('Aucune question disponible pour ces filtres !'); return;
+      window.App.toast(window.I18n.t('toast_no_questions_filter')); return;
     }
 
     await updateDoc(doc(db, 'rooms', roomCode), { status: 'playing' });
@@ -218,7 +218,7 @@ export const Game = {
       if (nextRound < rounds.length) {
         // Lancer la manche suivante
         const r = rounds[nextRound];
-        window.App.toast(`Manche ${nextRound+1} / ${rounds.length} — ${r.mode === 'normal' ? '🎯 Normal' : r.mode === 'blind' ? '🙈 Aveugle' : '⚡ Vitesse'}`);
+        window.App.toast(window.I18n.t('round_toast', nextRound+1, rounds.length, r.mode === 'normal' ? window.I18n.t('mode_normal') : r.mode === 'blind' ? window.I18n.t('mode_blind') : window.I18n.t('mode_speed')));
         await updateDoc(_gameRef(), {
           currentRound: nextRound,
           mode: r.mode,
@@ -256,11 +256,11 @@ export const Game = {
       const remaining = (state.timerSeconds - Math.floor((state.pausedElapsed || 0) / 1000)) * 1000;
       Game._hostTimer = setTimeout(() => Game._hostReveal(), Math.max(0, remaining));
       document.getElementById('btn-pause')?.querySelector ? null : null;
-      window.App.toast('Reprise !');
+      window.App.toast(window.I18n.t('toast_resume'));
     } else {
       const elapsed = Date.now() - state.questionStartedAt;
       await updateDoc(_gameRef(), { status: 'paused', pausedElapsed: elapsed });
-      window.App.toast('Pause');
+      window.App.toast(window.I18n.t('toast_pause'));
     }
   },
 
@@ -306,7 +306,7 @@ export const Game = {
           Object.keys(state.answers || {}).length;
         // Compter les joueurs
         const ansCount = Object.keys(state.answers || {}).length;
-        document.getElementById('host-answer-count').textContent = `${ansCount} réponses`;
+        document.getElementById('host-answer-count').textContent = window.I18n.t('answers_count', ansCount);
         // Bouton pause
         const btnPause = document.getElementById('btn-pause');
         if (btnPause) btnPause.textContent = state.status === 'paused' ? '▶' : '⏸';
@@ -367,7 +367,7 @@ export const Game = {
       case 'host_left':
         stopTimer();
         if (window.Game?._hostTimer) clearTimeout(window.Game._hostTimer);
-        window.App.toast("L'host a arrêté la partie.");
+        window.App.toast(window.I18n.t('toast_host_stopped'));
         L._leftGame = false;
         L.questionIndex = -1;
         document.getElementById('rejoin-game-btn')?.classList.add('hidden');
@@ -385,7 +385,7 @@ export const Game = {
   // RENDER QUESTION
   // ─────────────────────────────────────────
   _renderQuestion(state) {
-    const q = state.currentQuestion;
+    const q = window.I18n ? window.I18n.getQuestion(state.currentQuestion) : state.currentQuestion;
     document.getElementById('game-q-num').textContent = state.questionIndex + 1;
     document.getElementById('game-q-total').textContent = state.questionCount;
     document.getElementById('game-current-score').textContent = L.sessionScore;
@@ -410,7 +410,7 @@ export const Game = {
         document.getElementById('blind-input-row').classList.add('hidden');
         document.getElementById('blind-reveal-btn').classList.add('hidden');
         document.getElementById('blind-attempts').innerHTML =
-          `<div class="blind-attempt-chip correct">✅ Bonne réponse !</div>`;
+          `<div class="blind-attempt-chip correct">${window.I18n.t('blind_correct')}</div>`;
       } else if (L.answered) {
         blindZone.classList.add('hidden');
         answersGrid.style.display = 'grid';
@@ -434,7 +434,7 @@ export const Game = {
     if (state.mode === 'speed') _updateSpeedBar(state);
     const ansCount = Object.keys(state.answers || {}).length;
     if (window.session.isHost) {
-      document.getElementById('host-answer-count').textContent = `${ansCount} réponses`;
+      document.getElementById('host-answer-count').textContent = window.I18n.t('answers_count', ansCount);
     }
     if (L.answered && !L._highlightDone) {
       _highlightAnswer(state);
@@ -478,7 +478,7 @@ export const Game = {
   async submitBlindAnswer() {
     if (L.answered) return;
     const input = document.getElementById('blind-answer').value.trim();
-    if (!input) { window.App.toast('Entre une réponse !'); return; }
+    if (!input) { window.App.toast(window.I18n.t('toast_blind_input')); return; }
 
     const snap = await getDoc(_gameRef());
     if (!snap.exists() || snap.data().status !== 'question') return;
@@ -560,15 +560,16 @@ export const Game = {
   },
 
   _showPhase1(state, q, myAnswer, isCorrect, points) {
+    const qT = window.I18n ? window.I18n.getQuestion(q) : q;
     document.getElementById('reveal-phase1').classList.remove('hidden');
     document.getElementById('reveal-phase2').classList.add('hidden');
     document.getElementById('reveal-phase3').classList.add('hidden');
 
-    document.getElementById('reveal-correct-answer').textContent = q.answers[q.correct];
-    document.getElementById('reveal-focus').textContent = q.focus || '';
+    document.getElementById('reveal-correct-answer').textContent = qT.answers[qT.correct];
+    document.getElementById('reveal-focus').textContent = qT.focus || '';
 
     const myIcon = isCorrect ? '✅' : myAnswer ? '❌' : '⏱️';
-    const myText = isCorrect ? `+${points} pt${points > 1 ? 's' : ''}` : myAnswer ? 'Raté' : 'Pas répondu';
+    const myText = isCorrect ? `+${points} pt${points > 1 ? 's' : ''}` : myAnswer ? window.I18n.t('result_miss') : window.I18n.t('result_no_answer');
     document.getElementById('reveal-my-result-icon').textContent = myIcon;
     document.getElementById('reveal-my-result-text').textContent = myText;
 
@@ -584,7 +585,7 @@ export const Game = {
           <span style="color:${a.isCorrect ? 'var(--success)' : 'var(--error)'};font-size:12px;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${chosen}</span>
         </div>`;
       });
-      hostDiv.innerHTML = `<div style="font-size:11px;font-weight:800;letter-spacing:1px;text-transform:uppercase;color:var(--text3);margin-bottom:8px">Réponses des joueurs</div>${rows.join('')}`;
+      hostDiv.innerHTML = `<div style="font-size:11px;font-weight:800;letter-spacing:1px;text-transform:uppercase;color:var(--text3);margin-bottom:8px">${window.I18n.t('players_answers_label')}</div>${rows.join('')}`;
     }
 
     // Liste des résultats
@@ -642,7 +643,7 @@ export const Game = {
 
     const isLast = state.questionIndex + 1 >= state.questionCount;
     document.getElementById('reveal-next-label').textContent =
-      isLast ? 'Fin de la partie !' : `Question ${state.questionIndex + 2} / ${state.questionCount}`;
+      isLast ? window.I18n.t('end_of_game') : window.I18n.t('question_n', state.questionIndex + 2, state.questionCount);
 
     let count = 3;
     document.getElementById('reveal-countdown').textContent = count;
@@ -664,9 +665,7 @@ export const Game = {
     document.getElementById('end-score').textContent = L.sessionScore;
     const pct = L.sessionTotal ? Math.round(L.sessionCorrect / L.sessionTotal * 100) : 0;
     document.getElementById('end-stats').innerHTML =
-      `✅ ${L.sessionCorrect} bonne${L.sessionCorrect > 1 ? 's' : ''} réponse${L.sessionCorrect > 1 ? 's' : ''}<br>
-       ❌ ${L.sessionTotal - L.sessionCorrect} erreur${L.sessionTotal - L.sessionCorrect !== 1 ? 's' : ''}<br>
-       📊 ${pct}% de réussite`;
+      `✅ ${window.I18n.t('correct_answers', L.sessionCorrect)}<br>❌ ${window.I18n.t('wrong_answers', L.sessionTotal - L.sessionCorrect)}<br>📊 ${window.I18n.t('success_pct', pct)}`;
 
     document.getElementById('end-podium').innerHTML = sorted.slice(0, 3).map((p, i) =>
       `<div class="podium-item" style="${i === 0 ? 'border-color:#ffd700' : ''}">
@@ -703,19 +702,19 @@ export const Game = {
 
   requestLeave() {
     if (window.session.isHost) {
-      window.Modal.show('Arrêter la partie ?',
-        '<p>Tous les joueurs seront renvoyés dans le lobby. Le salon reste ouvert.</p>',
+      window.Modal.show(window.I18n.t('modal_stop_title'),
+        window.I18n.t('modal_stop_body'),
         [
-          { label: 'Continuer', class: 'btn btn-ghost', onclick: 'Modal.close()' },
-          { label: 'Arrêter la partie', class: 'btn btn-danger', onclick: 'Modal.close(); Game.hostStopGame()' }
+          { label: window.I18n.t('modal_continue'), class: 'btn btn-ghost', onclick: 'Modal.close()' },
+          { label: window.I18n.t('modal_stop_confirm'), class: 'btn btn-danger', onclick: 'Modal.close(); Game.hostStopGame()' }
         ]
       );
     } else {
-      window.Modal.show('Quitter la partie ?',
-        '<p>Tu retourneras dans le lobby. Tu pourras rejoindre si la partie est toujours en cours.</p>',
+      window.Modal.show(window.I18n.t('modal_leave_title'),
+        window.I18n.t('modal_leave_body'),
         [
-          { label: 'Rester', class: 'btn btn-ghost', onclick: 'Modal.close()' },
-          { label: 'Quitter', class: 'btn btn-danger', onclick: 'Game.leaveGame(); Modal.close();' }
+          { label: window.I18n.t('modal_stay'), class: 'btn btn-ghost', onclick: 'Modal.close()' },
+          { label: window.I18n.t('modal_leave'), class: 'btn btn-danger', onclick: 'Game.leaveGame(); Modal.close();' }
         ]
       );
     }
@@ -778,7 +777,7 @@ function _updateSpeedBar(state) {
   document.getElementById('speed-live-list').innerHTML =
     ranked.map(([, d], i) =>
       `<div class="speed-winner-row"><span class="speed-pos">${icons[i]}</span><span>${d.pseudo}</span></div>`
-    ).join('') || '<div style="color:var(--text3);font-size:13px">Personne encore…</div>';
+    ).join('') || `<div style="color:var(--text3);font-size:13px">${window.I18n.t('speed_no_one_yet')}</div>`;
 }
 
 function _calcPoints(state, q, answer) {

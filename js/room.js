@@ -62,7 +62,7 @@ export const Room = {
         .slice(0, 100);
 
       if (!openRooms.length) {
-        container.innerHTML = '<div class="empty-state">Aucun salon ouvert pour le moment.</div>';
+        container.innerHTML = '<div class="empty-state">' + window.I18n.t('no_open_rooms') + '</div>';
         return;
       }
 
@@ -85,7 +85,7 @@ export const Room = {
         </div>
       `).join('');
     } catch(e) {
-      container.innerHTML = '<div class="empty-state">Erreur de chargement. Réessaie.</div>';
+      container.innerHTML = '<div class="empty-state">' + window.I18n.t('room_load_error') + '</div>';
       console.error(e);
     }
   },
@@ -97,7 +97,7 @@ export const Room = {
       // Mot de passe requis → scroll vers le champ et laisser l'utilisateur le saisir
       document.getElementById('join-form-section')?.scrollIntoView({ behavior: 'smooth' });
       document.getElementById('join-password')?.focus();
-      window.App.toast(`Salon ${code} — entre le mot de passe pour continuer`);
+      window.App.toast(window.I18n.t('room_password_hint', code));
     } else {
       // Pas de mot de passe → aller directement à la sélection de profils
       Room.checkRoom();
@@ -114,17 +114,17 @@ export const Room = {
     const errEl  = document.getElementById('create-error');
     errEl.classList.add('hidden');
 
-    if (!code || code.length < 2)   { errEl.textContent = 'Code trop court (min. 2 caractères).'; errEl.classList.remove('hidden'); return; }
-    if (!pseudo || pseudo.length < 2){ errEl.textContent = 'Entre un pseudo (min. 2 caractères).';  errEl.classList.remove('hidden'); return; }
-    if (!/^[A-Z0-9_\-]{2,20}$/i.test(code)) { errEl.textContent = 'Code invalide (lettres, chiffres, - et _ uniquement).'; errEl.classList.remove('hidden'); return; }
+    if (!code || code.length < 2)   { errEl.textContent = window.I18n.t('err_code_short'); errEl.classList.remove('hidden'); return; }
+    if (!pseudo || pseudo.length < 2){ errEl.textContent = window.I18n.t('err_pseudo_short');  errEl.classList.remove('hidden'); return; }
+    if (!/^[A-Z0-9_\-]{2,20}$/i.test(code)) { errEl.textContent = window.I18n.t('err_code_invalid'); errEl.classList.remove('hidden'); return; }
 
     const selAv = document.querySelector('#avatar-grid-create .avatar-item-wrap.selected');
-    if (!selAv) { errEl.textContent = 'Choisis un avatar.'; errEl.classList.remove('hidden'); return; }
+    if (!selAv) { errEl.textContent = window.I18n.t('err_no_avatar'); errEl.classList.remove('hidden'); return; }
     const avatarId = selAv.dataset.avatarId;
 
     const existing = await getDoc(doc(db, 'rooms', code));
     if (existing.exists()) {
-      errEl.textContent = `Le salon "${code}" existe déjà. Choisis un autre code.`;
+      errEl.textContent = window.I18n.t('err_room_exists', code);
       errEl.classList.remove('hidden'); return;
     }
 
@@ -161,16 +161,16 @@ export const Room = {
     const errEl = document.getElementById('join-error');
     errEl.classList.add('hidden');
 
-    if (!code) { errEl.textContent = 'Entre le code du salon.'; errEl.classList.remove('hidden'); return; }
+    if (!code) { errEl.textContent = window.I18n.t('err_no_code'); errEl.classList.remove('hidden'); return; }
 
     const roomSnap = await getDoc(doc(db, 'rooms', code));
-    if (!roomSnap.exists()) { errEl.textContent = `Salon "${code}" introuvable.`; errEl.classList.remove('hidden'); return; }
+    if (!roomSnap.exists()) { errEl.textContent = window.I18n.t('err_room_not_found', code); errEl.classList.remove('hidden'); return; }
     const roomData = roomSnap.data();
 
-    if (roomData.status === 'closed') { errEl.textContent = 'Ce salon est fermé.'; errEl.classList.remove('hidden'); return; }
+    if (roomData.status === 'closed') { errEl.textContent = window.I18n.t('err_room_closed'); errEl.classList.remove('hidden'); return; }
     if (roomData.passwordHash) {
       const hash = await hashPw(pw);
-      if (hash !== roomData.passwordHash) { errEl.textContent = 'Mot de passe du salon incorrect.'; errEl.classList.remove('hidden'); return; }
+      if (hash !== roomData.passwordHash) { errEl.textContent = window.I18n.t('err_room_password'); errEl.classList.remove('hidden'); return; }
     }
 
     // Charger les joueurs existants
@@ -183,7 +183,7 @@ export const Room = {
 
     // Label étape 2
     const label = document.getElementById('step2-code-label');
-    if (label) label.textContent = `Salon : ${code}`;
+    if (label) label.textContent = window.I18n.t('room_label', code);
 
     // Afficher la sélection de profil
     Room._showProfileSelector(players);
@@ -218,7 +218,7 @@ export const Room = {
           <div class="profile-avatar">${av ? av.svg : ''}</div>
           <div class="profile-name">${p.pseudo}</div>
           ${isOnline
-            ? `<div class="profile-online-badge">🟢 En ligne</div>`
+            ? `<div class="profile-online-badge">🟢 ${window.I18n.t('online_badge')}</div>`
             : `<div class="profile-score">${p.score > 0 ? p.score+' pts' : ''}</div>
                ${hasPassword ? '<div class="profile-lock">🔒</div>' : ''}`
           }
@@ -266,13 +266,13 @@ export const Room = {
     if (Room._selectedProfileUid) {
       // ── Rejoindre un profil existant
       const pSnap = await getDoc(doc(db, 'rooms', code, 'players', Room._selectedProfileUid));
-      if (!pSnap.exists()) { errEl.textContent = 'Profil introuvable.'; errEl.classList.remove('hidden'); return; }
+      if (!pSnap.exists()) { errEl.textContent = window.I18n.t('err_profile_not_found'); errEl.classList.remove('hidden'); return; }
       const player = pSnap.data();
 
       if (player.passwordHash) {
         const pw = document.getElementById('existing-profile-pw').value;
         const hash = await hashPw(pw);
-        if (hash !== player.passwordHash) { errEl.textContent = 'Mot de passe incorrect.'; errEl.classList.remove('hidden'); return; }
+        if (hash !== player.passwordHash) { errEl.textContent = window.I18n.t('err_profile_password'); errEl.classList.remove('hidden'); return; }
       }
 
       // Marquer online
@@ -285,17 +285,17 @@ export const Room = {
       // ── Créer un nouveau profil
       const pseudo = document.getElementById('join-new-pseudo').value.trim();
       const playerPw = document.getElementById('join-new-pw').value;
-      if (!pseudo || pseudo.length < 2) { errEl.textContent = 'Entre un pseudo (min. 2 caractères).'; errEl.classList.remove('hidden'); return; }
+      if (!pseudo || pseudo.length < 2) { errEl.textContent = window.I18n.t('err_pseudo_short'); errEl.classList.remove('hidden'); return; }
 
       const selAv = document.querySelector('#avatar-grid-join2 .avatar-item-wrap.selected');
-      if (!selAv) { errEl.textContent = 'Choisis un avatar.'; errEl.classList.remove('hidden'); return; }
+      if (!selAv) { errEl.textContent = window.I18n.t('err_no_avatar'); errEl.classList.remove('hidden'); return; }
       const avatarId = selAv.dataset.avatarId;
 
       // Vérifier pseudo unique
       const pSnap = await getDocs(collection(db,'rooms',code,'players'));
       Room._joiningPlayers = pSnap.docs.map(d => d.data());
       const taken = Room._joiningPlayers.some(p => p.pseudo.toLowerCase() === pseudo.toLowerCase());
-      if (taken) { errEl.textContent = 'Ce pseudo est déjà pris.'; errEl.classList.remove('hidden'); return; }
+      if (taken) { errEl.textContent = window.I18n.t('err_pseudo_taken'); errEl.classList.remove('hidden'); return; }
 
       const uid = genUid();
       const passwordHash = await hashPw(playerPw);
@@ -391,7 +391,7 @@ export const Room = {
     if (window.Game?._hostAnswerWatcher) { window.Game._hostAnswerWatcher(); window.Game._hostAnswerWatcher = null; }
     localStorage.removeItem('quiz_session');
     window.session = { roomCode:null, uid:null, pseudo:null, avatarId:null, isHost:false, teamId:null };
-    window.App.toast('Le salon a été fermé par le host.');
+    window.App.toast(window.I18n.t('room_closed'));
     // Retour au menu depuis n'importe quel écran
     App.showScreen('home');
   },
@@ -417,7 +417,7 @@ export const Room = {
         ${rankDisplay ? `<div class="lobby-player-rank">${rankDisplay}</div>` : ''}
         <div class="lobby-player-avatar">${av ? av.svg : ''}</div>
         <div class="lobby-player-name">${p.pseudo}${isMe?' 👈':''}</div>
-        ${p.isHost ? '<div class="lobby-player-host-badge">👑 Host</div>' : ''}
+        ${p.isHost ? '<div class="lobby-player-host-badge">👑 ' + window.I18n.t('host_badge') + '</div>' : ''}
         <div class="lobby-player-score">${p.score > 0 ? p.score+' pts' : ''}</div>
         ${p.teamName ? `<div class="lobby-player-team">${p.teamName}</div>` : ''}
       </div>`;
@@ -440,42 +440,42 @@ export const Room = {
     container.innerHTML = Room._rounds.map((r, i) => `
       <div class="round-card" id="round-card-${i}">
         <div class="round-card-header">
-          <span class="round-card-title">Manche ${i+1}</span>
+          <span class="round-card-title">${window.I18n.t('round_label_config', i+1)}</span>
           ${Room._rounds.length > 1
             ? `<button class="round-delete-btn" onclick="Room.deleteRound(${i})">✕</button>`
             : ''}
         </div>
         <div class="round-config">
           <div class="config-row">
-            <span class="config-label">Mode</span>
+            <span class="config-label">${window.I18n.t('config_label_mode')}</span>
             <div class="btn-group">${['normal','blind','speed'].map(v =>
               `<button class="btn-toggle${r.mode===v?' active':''}"
-                onclick="Room.setRound(${i},'mode','${v}')">${{normal:'🎯 Normal',blind:'🙈 Aveugle',speed:'⚡ Vitesse'}[v]}</button>`
+                onclick="Room.setRound(${i},'mode','${v}')">${window.I18n.t('mode_' + v)}</button>`
             ).join('')}</div>
           </div>
           <div class="config-row">
-            <span class="config-label">Questions</span>
+            <span class="config-label">${window.I18n.t('config_label_questions')}</span>
             <div class="btn-group">${[5,10,15,0].map(v =>
               `<button class="btn-toggle${r.count===v?' active':''}"
-                onclick="Room.setRound(${i},'count',${v})">${v===0?'Toutes':v}</button>`
+                onclick="Room.setRound(${i},'count',${v})">${v===0?window.I18n.t('round_count_all'):v}</button>`
             ).join('')}</div>
           </div>
           <div class="config-row">
-            <span class="config-label">Thème</span>
-            <div class="btn-group">${[['all','Tous'],['manga','Mangas'],['jv','JV'],['roman','Romans'],['series','Séries'],['gameplay','Gameplay']].map(([v,l]) =>
+            <span class="config-label">${window.I18n.t('config_label_theme')}</span>
+            <div class="btn-group">${[['all', window.I18n.t('theme_all')],['manga', window.I18n.t('theme_manga')],['jv', window.I18n.t('theme_jv')],['roman', window.I18n.t('theme_roman')],['series', window.I18n.t('theme_series')],['gameplay', window.I18n.t('theme_gameplay')]].map(([v,l]) =>
               `<button class="btn-toggle${r.theme===v?' active':''}"
                 onclick="Room.setRound(${i},'theme','${v}')">${l}</button>`
             ).join('')}</div>
           </div>
           <div class="config-row">
-            <span class="config-label">Difficulté</span>
-            <div class="btn-group">${[['all','Toutes'],['debutant','Débutant'],['connaisseur','Connaisseur'],['otaku','Otaku']].map(([v,l]) =>
+            <span class="config-label">${window.I18n.t('config_label_difficulty')}</span>
+            <div class="btn-group">${[['all', window.I18n.t('diff_all')],['debutant', window.I18n.t('diff_debutant')],['connaisseur', window.I18n.t('diff_connaisseur')],['otaku', window.I18n.t('diff_otaku')]].map(([v,l]) =>
               `<button class="btn-toggle${r.difficulty===v?' active':''}"
                 onclick="Room.setRound(${i},'difficulty','${v}')">${l}</button>`
             ).join('')}</div>
           </div>
           <div class="config-row">
-            <span class="config-label">Timer</span>
+            <span class="config-label">${window.I18n.t('config_label_timer')}</span>
             <div class="btn-group">${[10,15,20,30,45].map(v =>
               `<button class="btn-toggle${r.timer===v?' active':''}"
                 onclick="Room.setRound(${i},'timer',${v})">${v}s</button>`
@@ -533,7 +533,7 @@ export const Room = {
     const myTeamId = window.session.teamId;
 
     if (!teams.length) {
-      container.innerHTML = '<div style="color:var(--text3);font-size:13px;padding:8px 0">Aucune équipe pour l\'instant.</div>';
+      container.innerHTML = `<div style="color:var(--text3);font-size:13px;padding:8px 0">${window.I18n.t('no_teams_yet')}</div>`;
       return;
     }
 
@@ -543,7 +543,7 @@ export const Room = {
 
     container.innerHTML = sorted.map((t, rank) => {
       const isMyTeam = myTeamId === t.id;
-      const members = (t.memberNames||[]).join(', ') || 'Aucun membre';
+      const members = (t.memberNames||[]).join(', ') || window.I18n.t('no_members');
       const isLeading = maxScore > 0 && t.score === maxScore;
       // Stocker id et nom dans data attributes pour éviter le bug apostrophe
       return `<div class="team-card-lobby ${isMyTeam ? 'team-card-mine' : ''}">
@@ -554,11 +554,11 @@ export const Room = {
         </div>
         <span class="team-card-score">${t.score > 0 ? t.score+' pts' : ''}</span>
         ${isMyTeam
-          ? `<span class="team-joined-badge">✓ Rejoint</span>`
+          ? `<span class="team-joined-badge">✓ ${window.I18n.t('team_joined_badge')}</span>`
           : `<button class="team-join-btn"
                data-team-id="${t.id}"
                data-team-name="${t.name.replace(/"/g,'&quot;')}"
-               onclick="Room._onJoinTeamClick(this)">Rejoindre</button>`}
+               onclick="Room._onJoinTeamClick(this)">${window.I18n.t('btn_join_team')}</button>`}
         ${window.session.isHost
           ? `<button class="team-delete-btn" data-team-id="${t.id}" onclick="Room._onDeleteTeamClick(this)">✕</button>`
           : ''}
@@ -578,28 +578,28 @@ export const Room = {
   },
 
   async addTeam() {
-    window.Modal.show('Créer une équipe', `
-      <div class="form-group"><label>Nom de l'équipe</label>
-      <input type="text" id="new-team-name" placeholder="ex: Les Otakus" maxlength="30"/></div>
+    window.Modal.show(window.I18n.t('modal_create_team_title'), `
+      <div class="form-group"><label>${window.I18n.t('modal_create_team_label')}</label>
+      <input type="text" id="new-team-name" placeholder="${window.I18n.t('team_placeholder')}" maxlength="30"/></div>
     `, [
-      { label: 'Annuler', class: 'btn btn-ghost', onclick: 'Modal.close()' },
-      { label: '✅ Créer', class: 'btn btn-primary', onclick: 'Room.confirmAddTeam()' }
+      { label: window.I18n.t('modal_cancel'), class: 'btn btn-ghost', onclick: 'Modal.close()' },
+      { label: window.I18n.t('modal_create'), class: 'btn btn-primary', onclick: 'Room.confirmAddTeam()' }
     ]);
   },
 
   async confirmAddTeam() {
     const name = document.getElementById('new-team-name').value.trim();
-    if (!name) { window.App.toast('Nom requis !'); return; }
+    if (!name) { window.App.toast(window.I18n.t('team_name_required')); return; }
     // Vérifier nom unique
     if (Room._teams.some(t => t.name.toLowerCase() === name.toLowerCase())) {
-      window.App.toast('Une équipe avec ce nom existe déjà !'); return;
+      window.App.toast(window.I18n.t('team_name_duplicate')); return;
     }
     const id = 'team_' + Date.now().toString(36);
     await setDoc(doc(db, 'rooms', window.session.roomCode, 'teams', id), {
       name, memberUids: [], memberNames: [], score: 0
     });
     window.Modal.close();
-    window.App.toast(`Équipe "${name}" créée !`);
+    window.App.toast(window.I18n.t('team_created', name));
   },
 
   async joinTeam(teamId, teamName, btn) {
@@ -609,11 +609,11 @@ export const Room = {
     const { roomCode, uid, pseudo } = window.session;
     // Vérifier qu'on n'est pas déjà dans cette équipe
     if (window.session.teamId === teamId) {
-      if (btn) { btn.disabled = false; btn.textContent = 'Rejoindre'; }
+      if (btn) { btn.disabled = false; btn.textContent = window.I18n.t('btn_join_team'); }
       return;
     }
     const team = Room._teams.find(t => t.id === teamId);
-    if (!team) { if (btn) { btn.disabled = false; btn.textContent = 'Rejoindre'; } return; }
+    if (!team) { if (btn) { btn.disabled = false; btn.textContent = window.I18n.t('btn_join_team'); } return; }
 
     // Quitter l'ancienne équipe si besoin
     if (window.session.teamId && window.session.teamId !== teamId) {
@@ -638,7 +638,7 @@ export const Room = {
     await updateDoc(doc(db,'rooms',roomCode,'players',uid), { teamId, teamName });
     window.session.teamId = teamId;
     localStorage.setItem('quiz_session', JSON.stringify(window.session));
-    window.App.toast(`Équipe "${teamName}" rejointe !`);
+    window.App.toast(window.I18n.t('team_joined', teamName));
   },
 
   async deleteTeam(teamId) {
@@ -650,20 +650,20 @@ export const Room = {
       ));
     }
     await deleteDoc(doc(db,'rooms',roomCode,'teams',teamId));
-    window.App.toast('Équipe supprimée');
+    window.App.toast(window.I18n.t('team_deleted'));
   },
 
   // ──────────────────────────────────────────
   // QUITTER LE SALON
   // ──────────────────────────────────────────
   async leaveRoom() {
-    window.Modal.show('Quitter le salon ?',
+    window.Modal.show(window.I18n.t('modal_leave_room_title'),
       window.session.isHost
-        ? '<p>Tu es le host. <strong>Quitter ferme le salon pour tout le monde.</strong></p>'
-        : '<p>Ton score sera conservé si tu reviens avec le même code.</p>',
+        ? window.I18n.t('modal_leave_room_host')
+        : window.I18n.t('modal_leave_room_player'),
       [
-        { label: 'Rester', class: 'btn btn-ghost', onclick: 'Modal.close()' },
-        { label: 'Quitter', class: 'btn btn-danger', onclick: 'Room._confirmLeave()' }
+        { label: window.I18n.t('modal_stay'), class: 'btn btn-ghost', onclick: 'Modal.close()' },
+        { label: window.I18n.t('modal_leave'), class: 'btn btn-danger', onclick: 'Room._confirmLeave()' }
       ]
     );
   },

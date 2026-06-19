@@ -24,7 +24,7 @@ export const Leaderboard = {
         const players = snap.docs.map(d => d.data());
 
         if (!players.length) {
-          list.innerHTML = '<div class="empty-state">Aucun joueur dans ce salon.</div>';
+          list.innerHTML = `<div class="empty-state">${window.I18n.t('lb_no_players')}</div>`;
           return;
         }
 
@@ -38,7 +38,7 @@ export const Leaderboard = {
             <div class="lb-avatar">${av ? av.svg : ''}</div>
             <div class="lb-info">
               <div class="lb-name">${p.pseudo}${isMe ? ' 👈' : ''}${p.isHost ? ' 👑' : ''}</div>
-              ${p.teamName ? `<div class="lb-sub">Équipe : ${p.teamName}</div>` : '<div class="lb-sub">Sans équipe</div>'}
+              ${p.teamName ? `<div class="lb-sub">${window.I18n.t('lb_team_prefix')} ${p.teamName}</div>` : `<div class="lb-sub">${window.I18n.t('lb_no_team')}</div>`}
             </div>
             <div class="lb-score">${p.score}</div>
           </div>`;
@@ -52,7 +52,7 @@ export const Leaderboard = {
         const teams = snap.docs.map(d => ({ id: d.id, ...d.data() }));
 
         if (!teams.length) {
-          list.innerHTML = '<div class="empty-state">Aucune équipe dans ce salon.</div>';
+          list.innerHTML = `<div class="empty-state">${window.I18n.t('lb_no_teams')}</div>`;
           return;
         }
 
@@ -64,14 +64,14 @@ export const Leaderboard = {
             <div class="lb-avatar" style="display:flex;align-items:center;justify-content:center;font-size:28px">👥</div>
             <div class="lb-info">
               <div class="lb-name">${t.name}</div>
-              <div class="lb-sub">${(t.memberNames || []).join(', ') || 'Aucun membre'}</div>
+              <div class="lb-sub">${(t.memberNames || []).join(', ') || window.I18n.t('no_members')}</div>
             </div>
             <div class="lb-score">${t.score || 0}</div>
           </div>`;
         }).join('');
       }
     } catch(e) {
-      list.innerHTML = '<div class="empty-state">Erreur de chargement.</div>';
+      list.innerHTML = `<div class="empty-state">${window.I18n.t('lb_error')}</div>`;
       console.error('Leaderboard error:', e);
     }
   }
