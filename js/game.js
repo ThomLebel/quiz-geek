@@ -64,7 +64,7 @@ export const Game = {
     // Charger l'historique des questions déjà posées
     let usedIds = [];
     try {
-      const h = await getDoc(doc(db, 'game', 'history'));
+      const h = await getDoc(doc(db, 'rooms', roomCode));
       if (h.exists()) usedIds = h.data().usedIds || [];
     } catch(e) {}
 
@@ -143,10 +143,10 @@ export const Game = {
 
     // Sauvegarder dans l'historique
     try {
-      const h = await getDoc(doc(db, 'game', 'history'));
+      const h = await getDoc(doc(db, 'rooms', window.session.roomCode));
       const existing = h.exists() ? (h.data().usedIds||[]) : [];
       if (!existing.includes(q.id)) {
-        await setDoc(doc(db, 'game', 'history'), { usedIds:[...existing, q.id], updatedAt:Date.now() });
+        await updateDoc(doc(db, 'rooms', window.session.roomCode), { usedIds:[...existing, q.id] });
       }
     } catch(e) {}
 

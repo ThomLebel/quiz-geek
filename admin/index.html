@@ -99,7 +99,7 @@
       <div class="stat"><div class="stat-num" id="stat-used">—</div><div class="stat-label">Posées</div></div>
       <div class="stat"><div class="stat-num" id="stat-remaining">—</div><div class="stat-label">Disponibles</div></div>
     </div>
-    <button class="btn btn-danger" id="btn-reset-history" style="margin-top:12px">🔄 Réinitialiser l'historique</button>
+    <button class="btn btn-danger" id="btn-reset-history" style="margin-top:12px">ℹ️ Historique par salle</button>
   </div>
   <button class="btn btn-ghost" id="btn-refresh-stats">↻ Rafraîchir</button>
 </div>
@@ -353,22 +353,16 @@ async function loadStats() {
       document.getElementById('stat-deb').textContent   = qs.filter(q => q.difficulty === 'debutant').length;
       document.getElementById('stat-conn').textContent  = qs.filter(q => q.difficulty === 'connaisseur').length;
       document.getElementById('stat-otaku').textContent = qs.filter(q => q.difficulty === 'otaku').length;
-      const hist = await getDoc(doc(db, 'game', 'history'));
-      const used = hist.exists() ? (hist.data().usedIds || []).length : 0;
-      document.getElementById('stat-used').textContent = used;
-      document.getElementById('stat-remaining').textContent = Math.max(0, qs.length - used);
+      // L'historique est maintenant par salle — pas de total global
+      document.getElementById('stat-used').textContent = '—';
+      document.getElementById('stat-remaining').textContent = qs.length + ' (par salle)';
     } catch(e) { toast('Erreur stats : ' + e.message); }
   });
 }
 
 document.getElementById('btn-refresh-stats').addEventListener('click', loadStats);
 document.getElementById('btn-reset-history').addEventListener('click', () => {
-  if (!confirm('Réinitialiser l\'historique ?')) return;
-  waitReady(async () => {
-    const { doc, setDoc } = window._fs;
-    await setDoc(doc(window._db, 'game', 'history'), { usedIds: [], updatedAt: Date.now() });
-    toast('Historique réinitialisé !'); loadStats();
-  });
+  toast('L\'historique est désormais par salle — il se réinitialise à la fermeture de chaque salle.');
 });
 
 // ─── MIGRATION
