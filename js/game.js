@@ -386,6 +386,12 @@ export const Game = {
   // ─────────────────────────────────────────
   _renderQuestion(state) {
     const q = window.I18n ? window.I18n.getQuestion(state.currentQuestion) : state.currentQuestion;
+    // Rebuild shuffledAnswers with translated answer texts
+    // shuffledAnswers preserves originalIdx for correctness logic — only .text needs translating
+    const translatedShuffled = (state.currentQuestion.shuffledAnswers || []).map(s => ({
+      ...s,
+      text: q.answers[s.originalIdx] ?? s.text
+    }));
     document.getElementById('game-q-num').textContent = state.questionIndex + 1;
     document.getElementById('game-q-total').textContent = state.questionCount;
     document.getElementById('game-current-score').textContent = L.sessionScore;
@@ -414,7 +420,7 @@ export const Game = {
       } else if (L.answered) {
         blindZone.classList.add('hidden');
         answersGrid.style.display = 'grid';
-        _renderButtons(q.shuffledAnswers, true);
+        _renderButtons(translatedShuffled, true);
         _highlightAnswer(state);
       } else {
         document.getElementById('blind-input-row').classList.remove('hidden');
@@ -423,7 +429,7 @@ export const Game = {
     } else {
       blindZone.classList.add('hidden');
       answersGrid.style.display = 'grid';
-      _renderButtons(q.shuffledAnswers, L.answered);
+      _renderButtons(translatedShuffled, L.answered);
       if (L.answered) _highlightAnswer(state);
     }
 
@@ -511,10 +517,15 @@ export const Game = {
     document.getElementById('blind-reveal-btn').classList.add('hidden');
     getDoc(_gameRef()).then(snap => {
       if (!snap.exists()) return;
+      const raw = snap.data().currentQuestion;
+      const qT = window.I18n ? window.I18n.getQuestion(raw) : raw;
+      const translatedShuffled = (raw.shuffledAnswers || []).map(s => ({
+        ...s, text: qT.answers[s.originalIdx] ?? s.text
+      }));
       const grid = document.getElementById('answers-grid');
       grid.style.display = 'grid';
       document.getElementById('blind-zone').classList.add('hidden');
-      _renderButtons(snap.data().currentQuestion.shuffledAnswers, false);
+      _renderButtons(translatedShuffled, false);
     });
   },
 
@@ -578,11 +589,11 @@ export const Game = {
       const hostDiv = document.getElementById('reveal-host-answers');
       hostDiv.classList.remove('hidden');
       const rows = Object.entries(state.answers || {}).map(([, a]) => {
-        const chosen = q.shuffledAnswers?.find(s => s.originalIdx === a.originalIdx)?.text || '?';
+        const chosenEN = qT.answers[q.shuffledAnswers?.find(s => s.originalIdx === a.originalIdx)?.originalIdx] || '?';
         return `<div class="reveal-host-answer-row">
           ${a.isCorrect ? '✅' : '❌'}
           <span style="flex:1;font-weight:800">${a.pseudo}</span>
-          <span style="color:${a.isCorrect ? 'var(--success)' : 'var(--error)'};font-size:12px;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${chosen}</span>
+          <span style="color:${a.isCorrect ? 'var(--success)' : 'var(--error)'};font-size:12px;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${chosenEN}</span>
         </div>`;
       });
       hostDiv.innerHTML = `<div style="font-size:11px;font-weight:800;letter-spacing:1px;text-transform:uppercase;color:var(--text3);margin-bottom:8px">${window.I18n.t('players_answers_label')}</div>${rows.join('')}`;
