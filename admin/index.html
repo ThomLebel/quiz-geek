@@ -234,7 +234,7 @@
   <div class="card">
     <div id="translate-stats" style="margin-bottom:16px;color:var(--text3)">Cliquez sur Analyser pour commencer.</div>
     <div style="display:flex;gap:10px;flex-wrap:wrap">
-      <button class="btn btn-secondary" id="btn-translate-analyze">🔍 Analyser</button>
+      <button class="btn btn-ghost" id="btn-translate-analyze">🔍 Analyser</button>
       <button class="btn btn-primary" id="btn-translate-push" disabled>🚀 Pousser les traductions</button>
     </div>
     <div class="progress-bar" style="display:none;margin-top:12px" id="translate-progress-bar">
@@ -261,6 +261,7 @@
 // Importer la config et init Firebase via le SDK compat
 import { db as firestoreDb } from '../js/firebase-config.js?v=1';
 import { QUESTIONS as LOCAL_QUESTIONS } from '../js/data.js?v=1';
+import { I18n } from '../js/i18n.js?v=1';
 
 // Rendre disponible globalement
 window._db = firestoreDb;
@@ -273,6 +274,11 @@ import {
 } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
 
 window._fs = { collection, doc, getDoc, getDocs, setDoc, deleteDoc, writeBatch, query, where, orderBy, limit, startAfter };
+
+// Exposer les traductions EN (extraites depuis I18n)
+// I18n expose getQuestion() mais on a besoin de QUESTIONS_EN directement
+// On reconstruit la map depuis I18n en testant chaque id
+window._I18n = I18n;
 
 // Signaler que tout est prêt
 window._adminReady = true;
@@ -658,6 +664,145 @@ document.getElementById('btn-browse-more').addEventListener('click', browseMore)
 
 // Init au chargement
 waitReady(loadStats);
+
+// ─── TRADUCTIONS EN ──────────────────────────────────────────────────
+(function() {
+  let _toTranslate = [];
+
+  // Build QUESTIONS_EN map by probing I18n.getQuestion for each id 1-105
+  function buildENMap() {
+    const I18n = window._I18n;
+    if (!I18n) return {};
+    const map = {};
+    for (let id = 1; id <= 105; id++) {
+      // Create a fake FR question with this id to probe the EN lookup
+      const fakeQ = { id, question: '__test__', answers: [], correct: 0, focus: '' };
+      const result = I18n.getQuestion(fakeQ);
+      if (result.question !== '__test__') {
+        // There IS an EN translation for this id
+        map[id] = { question: result.question, answers: result.answers, focus: result.focus };
+      }
+    }
+    return map;
+  }
+
+  document.getElementById('btn-translate-analyze').addEventListener('click', async () => {
+    const logEl = document.getElementById('translate-log');
+    logEl.innerHTML = ''; logEl.style.display = 'block';
+    document.getElementById('translate-stats').textContent = 'Analyse en cours…';
+    document.getElementById('btn-translate-push').disabled = true;
+    _toTranslate = [];
+
+    // Temporarily set lang to 'en' to get EN translations
+    const savedLang = window._I18n?._lang;
+    if (window._I18n) window._I18n._lang = 'en';
+
+    const enMap = buildENMap();
+    const enCount = Object.keys(enMap).length;
+    log('translate-log', `📖 ${enCount} traductions EN chargées`, 'info');
+
+    // Restore lang
+    if (window._I18n) window._I18n._lang = savedLang;
+
+    if (!enCount) {
+      log('translate-log', '❌ Impossible de charger les traductions EN. Vérifiez que i18n.js est accessible.', 'err');
+      document.getElementById('translate-stats').textContent = 'Erreur : traductions EN introuvables.';
+      return;
+    }
+
+    await waitReady(async () => {
+      try {
+        const { collection, getDocs } = window._fs;
+        const db = window._db;
+        const snap = await getDocs(collection(db, 'questions'));
+        const docs = snap.docs.map(d => ({ ref: d.ref, ...d.data() }));
+        log('translate-log', `📦 ${docs.length} questions dans Firestore`, 'info');
+
+        let alreadyDone = 0, toTranslate = 0, noTranslation = 0;
+
+        for (const q of docs) {
+          if (q.question_en) { alreadyDone++; continue; }
+          // Match by localId (set during migration) or by extracting number from doc id
+          const lid = q.localId != null
+            ? q.localId
+            : (q.id?.match(/q_0*(\d+)$/) ? parseInt(q.id.match(/q_0*(\d+)$/)[1]) : null);
+
+          if (lid != null && enMap[lid]) {
+            _toTranslate.push({ ref: q.ref, en: enMap[lid], lid });
+            toTranslate++;
+          } else {
+            noTranslation++;
+          }
+        }
+
+        const stats = `✅ ${alreadyDone} déjà traduite(s)  ·  🆕 ${toTranslate} à pousser  ·  ⚠️ ${noTranslation} sans traduction EN (questions IA/CSV)`;
+        document.getElementById('translate-stats').textContent = stats;
+        log('translate-log', stats, 'info');
+
+        if (toTranslate > 0) {
+          document.getElementById('btn-translate-push').disabled = false;
+          log('translate-log', '👆 Clique sur "Pousser les traductions" pour continuer.', 'info');
+        } else if (alreadyDone > 0 && toTranslate === 0) {
+          log('translate-log', '✨ Toutes les questions traduisibles sont déjà à jour !', 'ok');
+        } else {
+          log('translate-log', '⚠️ Aucune question à traduire. Vérifie que la migration a bien été faite (localId requis).', 'err');
+        }
+      } catch(e) {
+        log('translate-log', '❌ Erreur Firestore : ' + e.message, 'err');
+        console.error(e);
+      }
+    });
+  });
+
+  document.getElementById('btn-translate-push').addEventListener('click', async () => {
+    if (!_toTranslate.length) return;
+    const btn = document.getElementById('btn-translate-push');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>Envoi…';
+    const progBar = document.getElementById('translate-progress-bar');
+    const prog = document.getElementById('translate-progress');
+    progBar.style.display = 'block';
+    prog.style.width = '0%';
+    log('translate-log', `📤 Envoi de ${_toTranslate.length} traductions vers Firestore…`, 'info');
+
+    await waitReady(async () => {
+      try {
+        const { writeBatch } = window._fs;
+        const db = window._db;
+        const CHUNK = 400;
+        let done = 0;
+
+        for (let i = 0; i < _toTranslate.length; i += CHUNK) {
+          const batch = writeBatch(db);
+          _toTranslate.slice(i, i + CHUNK).forEach(({ ref, en }) => {
+            batch.update(ref, {
+              question_en: en.question,
+              answers_en: en.answers,
+              focus_en: en.focus
+            });
+            done++;
+          });
+          await batch.commit();
+          prog.style.width = Math.round(done / _toTranslate.length * 100) + '%';
+          log('translate-log', `✅ Batch ${Math.floor(i/CHUNK)+1} — ${done}/${_toTranslate.length} questions mises à jour`, 'ok');
+        }
+
+        prog.style.width = '100%';
+        log('translate-log', `🎉 ${done} questions traduites dans Firestore !`, 'info');
+        toast(`${done} traductions poussées !`);
+        document.getElementById('translate-stats').textContent = `✅ ${done} questions traduites avec succès.`;
+        _toTranslate = [];
+        loadStats();
+      } catch(e) {
+        log('translate-log', '❌ Erreur : ' + e.message, 'err');
+        console.error(e);
+      }
+      btn.disabled = false;
+      btn.innerHTML = '🚀 Pousser les traductions';
+    });
+  });
+})();
+
 </script>
 
 </body>
